@@ -8,7 +8,9 @@ import { measureText } from '../lib/fonts';
 import { getText, IMAGE_RESOURCES, viewportFor } from '../lib/pdfjs';
 import { linkServiceFor } from '../lib/links';
 import { getLive, pageLiveKeys, type LiveRender } from '../lib/live';
+import { ocrKey } from '../lib/ocrModel';
 import { Overlay } from './Overlay';
+import { ScanNotice } from './Ocr';
 import { OBJ_LABEL } from './labels';
 
 const MAX_CANVAS_PIXELS = 16_777_216;
@@ -31,6 +33,7 @@ interface Props {
 
 export const PageView = memo(function PageView({ page, index, zoom, top, left, objects }: Props) {
   const doc = useStore((s) => s.docs[page.src]);
+  const ocr = useStore((s) => s.ocr[ocrKey(page)]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const annotRef = useRef<HTMLDivElement>(null);
@@ -142,7 +145,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
     div.replaceChildren();
     let alive = true;
     let layer: TextLayer | null = null;
-    getText(doc, page.index).then(async (tc) => {
+    getText(doc, page.index, ocr).then(async (tc) => {
       if (!alive) return;
       layer = new TextLayer({ textContentSource: tc, container: div, viewport: viewportFor(pdfPage, page, actions.get().zoom) });
       try {
@@ -162,7 +165,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
       setTextLayer(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfPage, doc, page.index, page.rotation]);
+  }, [pdfPage, doc, page.index, page.rotation, ocr]);
 
   useEffect(() => {
     if (!textLayer || !pdfPage) return;
@@ -236,6 +239,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
       <div ref={annotRef} className="annotationLayer" />
       <Overlay page={page} zoom={zoom} objects={objects} pdfPage={pdfPage} canvasRef={canvasRef} shown={shown} holes={holes} liveFailed={liveFailed} canvasVersion={canvasVersion} />
       <CommentPopup page={page} zoom={zoom} objects={objects} />
+      <ScanNotice page={page} doc={doc} recognized={!!ocr} />
       {!rendered && <div className="page-loading" />}
     </div>
   );

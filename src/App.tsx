@@ -32,6 +32,7 @@ import { OrganizeView } from './components/OrganizeView';
 import { Welcome } from './components/Welcome';
 import { DialogHost } from './components/Dialogs';
 import { TooltipLayer } from './components/Tooltip';
+import { OcrProgress } from './components/Ocr';
 
 const { get, set } = actions;
 
@@ -68,6 +69,7 @@ export function App() {
       <main className="main">{hasDoc ? organize ? <OrganizeView /> : <><Sidebar /><Viewer /></> : <Welcome />}</main>
       <DialogHost />
       <Toasts />
+      <OcrProgress />
       <Busy />
       <DropOverlay />
       <TooltipLayer />

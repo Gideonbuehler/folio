@@ -5,11 +5,14 @@ import { getText, loadSource, PasswordCancelled, textItems } from './lib/pdfjs';
 import { readFileBytes, uid } from './lib/util';
 import { forgetLiveSources } from './lib/live';
 import type { FileRef, Picked } from './lib/files';
+import { ocrKey, type OcrPage } from './lib/ocrModel';
 
 interface Snapshot {
   pages: PageItem[];
   objects: Obj[];
   meta: DocMeta;
+  /** Text recognized on scanned pages, by source page (see ocrKey). */
+  ocr: Record<string, OcrPage>;
 }
 
 export interface SearchPart {
@@ -122,6 +125,7 @@ export const useStore = create<State>()(() => ({
   pages: [],
   objects: [],
   meta: EMPTY_META,
+  ocr: {},
   fileName: '',
   fileHandle: null,
   dirty: false,
@@ -153,7 +157,7 @@ export const useStore = create<State>()(() => ({
 const get = useStore.getState;
 const set = useStore.setState;
 
-const snap = (s: Snapshot): Snapshot => ({ pages: s.pages, objects: s.objects, meta: s.meta });
+const snap = (s: Snapshot): Snapshot => ({ pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr });
 
 /* ------------------------------------------------------------------ */
 /* History                                                             */
@@ -179,7 +183,7 @@ export function endGesture() {
   const s = get();
   const base = s.gestureBase;
   if (!base) return;
-  const changed = base.pages !== s.pages || base.objects !== s.objects || base.meta !== s.meta;
+  const changed = base.pages !== s.pages || base.objects !== s.objects || base.meta !== s.meta || base.ocr !== s.ocr;
   set(changed ? { gestureBase: null, past: [...s.past, base].slice(-300), future: [], dirty: true } : { gestureBase: null });
 }
 
@@ -456,6 +460,7 @@ export async function openDocuments(picked: Picked[]) {
       docs,
       pages: loaded.flatMap((l) => l.pages),
       objects: [],
+      ocr: {},
       meta: {
         title: str(info?.Title),
         author: str(info?.Author),
@@ -498,6 +503,7 @@ export function closeDocument() {
     pages: [],
     objects: [],
     meta: EMPTY_META,
+    ocr: {},
     fileName: '',
     fileHandle: null,
     dirty: false,
@@ -649,11 +655,11 @@ export async function runSearch(query: string, matchCase = get().search.matchCas
   if (!q) return;
   const needle = matchCase ? q : q.toLowerCase();
   const hits: SearchHit[] = [];
-  const { pages, docs } = get();
+  const { pages, docs, ocr } = get();
   for (const page of pages) {
     const doc = docs[page.src];
     if (!doc) continue;
-    const tc = await getText(doc, page.index);
+    const tc = await getText(doc, page.index, ocr[ocrKey(page)]);
     if (run !== searchRun) return;
     const items = textItems(tc);
     // Concatenate items, remembering where each character came from.

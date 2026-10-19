@@ -66,7 +66,7 @@ async function build(opts: ExportOptions = {}) {
   const s = get();
   const { buildPdf } = await import('./export');
   return buildPdf(
-    { docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta },
+    { docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr },
     { ...opts, onProgress: (t) => set({ busy: t }) },
   );
 }

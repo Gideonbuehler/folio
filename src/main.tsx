@@ -11,8 +11,9 @@ if (import.meta.env.DEV) {
     open: (bytes: Uint8Array, name = 'test.pdf') => openDocuments([{ file: new File([bytes as BlobPart], name, { type: 'application/pdf' }), handle: null }]),
     build: () => import('./lib/export').then(({ buildPdf }) => {
       const s = useStore.getState();
-      return buildPdf({ docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta });
+      return buildPdf({ docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr });
     }),
+    recognize: (pageIds?: string[]) => import('./lib/ocr').then(({ recognizeText }) => recognizeText(pageIds)),
   };
 }
 

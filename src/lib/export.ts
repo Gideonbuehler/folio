@@ -52,12 +52,16 @@ import { analyze, isolateImage, mul, overlap, pageContentBytes, parseContent, qu
 import { hexToRgb } from './util';
 import { fillMatchingBackground } from './sample';
 import { applyRedaction, hiddenByMarks, marksOn, planRedaction, type RedactionPlan } from './redact';
+import { ocrKey, type OcrPage } from './ocrModel';
+import { addOcrText } from './ocrPdf';
 
 export interface ExportInput {
   docs: Record<string, SourceDoc>;
   pages: PageItem[];
   objects: Obj[];
   meta: DocMeta;
+  /** Text recognized on scanned pages, by source page; saved as invisible text. */
+  ocr?: Record<string, OcrPage>;
 }
 
 export interface ExportOptions {
@@ -125,7 +129,8 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     plans.set(item.id, plan);
     if (plan.fallback) {
       redacted.add(item.id);
-      warnings.add(`Page ${pages.indexOf(item) + 1} was flattened to an image because ${plan.fallback}. Its text is no longer selectable.`);
+      const after = input.ocr?.[ocrKey(item)] ? 'Its recognized text is kept.' : 'Its text is no longer selectable.';
+      warnings.add(`Page ${pages.indexOf(item) + 1} was flattened to an image because ${plan.fallback}. ${after}`);
     }
   }
 
@@ -185,8 +190,12 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
 
   /* 4. Draw objects and add annotations. */
   for (const [i, { item, page, m, raster }] of outPages.entries()) {
-    const objs = byPage.get(item.id);
-    if (!objs?.length) continue;
+    const objs = byPage.get(item.id) ?? [];
+    // Recognized text goes in first, so redaction and Edit-mode changes below
+    // remove it like any other text (it also skips what they cover itself).
+    const ocr = input.ocr?.[ocrKey(item)];
+    if (ocr) addOcrText(out, page, m, ocr, objs);
+    if (!objs.length) continue;
     opts.onProgress?.(`Writing page ${i + 1} of ${outPages.length}…`);
     const marks = marksOn(objs);
     // Redaction first: it works on the page exactly as the plan saw it.
