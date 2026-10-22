@@ -9,7 +9,7 @@ import { PDFDocument } from '@cantoo/pdf-lib';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { Obj, PageItem, SourceDoc } from '../types';
 import { applyContentEdits, loadLib } from './export';
-import { pdfjs } from './pdfjs';
+import { docParams, pdfjs } from './pdfjs';
 
 const libs = new Map<string, Promise<PDFDocument>>();
 
@@ -79,14 +79,7 @@ export async function buildLive(doc: SourceDoc, item: PageItem, objects: Obj[], 
   );
   const native = applyContentEdits(out, page, item.m, forRender);
   const bytes = await out.save({ useObjectStreams: false });
-  const pdf = await pdfjs.getDocument({
-    data: bytes,
-    cMapUrl: `${import.meta.env.BASE_URL}pdfjs/cmaps/`,
-    cMapPacked: true,
-    standardFontDataUrl: `${import.meta.env.BASE_URL}pdfjs/standard_fonts/`,
-    wasmUrl: `${import.meta.env.BASE_URL}pdfjs/wasm/`,
-    iccUrl: `${import.meta.env.BASE_URL}pdfjs/iccs/`,
-  }).promise;
+  const pdf = await pdfjs.getDocument(docParams(bytes)).promise;
   return { key, keys, native, pdf, page: await pdf.getPage(1) };
 }
 

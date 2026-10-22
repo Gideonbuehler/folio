@@ -52,6 +52,7 @@ import { analyze, isolateImage, mul, overlap, pageContentBytes, parseContent, qu
 import { hexToRgb } from './util';
 import { fillMatchingBackground } from './sample';
 import { applyRedaction, hiddenByMarks, marksOn, planRedaction, type RedactionPlan } from './redact';
+import { settleGeometry } from './pdfjs';
 
 export interface ExportInput {
   docs: Record<string, SourceDoc>;
@@ -81,7 +82,11 @@ const REDACT_SCALE = 2.5; // ~180 dpi raster for redacted pages
 export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Promise<ExportResult> {
   const warnings = new Set<string>();
   const want = opts.pageIds ? new Set(opts.pageIds) : null;
-  const pages = input.pages.filter((p) => !want || want.has(p.id));
+  // Large documents open with guessed sizes for pages not measured yet.
+  const pages = await settleGeometry(
+    input.pages.filter((p) => !want || want.has(p.id)),
+    input.docs,
+  );
   const byPage = new Map<string, Obj[]>();
   for (const o of input.objects) {
     const list = byPage.get(o.page);

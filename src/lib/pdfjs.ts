@@ -22,6 +22,23 @@ const DOC_OPTIONS = {
   iccUrl: `${ASSETS}iccs/`,
 };
 
+/**
+ * One pdf.js worker for every document, started ahead of time. Starting a
+ * worker per document took most of the time to open a file, and every live
+ * render of an edited page paid it again.
+ */
+let worker: pdfjs.PDFWorker | null = null;
+function sharedWorker() {
+  if (!worker || worker.destroyed) worker = new pdfjs.PDFWorker();
+  return worker;
+}
+if (typeof Worker !== 'undefined') setTimeout(sharedWorker, 0);
+
+/** Parameters for opening PDF bytes with pdf.js (takes ownership of `data`). */
+export function docParams(data: Uint8Array) {
+  return { data, ...DOC_OPTIONS, worker: sharedWorker() };
+}
+
 export class PasswordCancelled extends Error {}
 
 /**
@@ -33,7 +50,7 @@ export async function loadSource(
   name: string,
   askPassword: (retry: boolean) => Promise<string | null>,
 ): Promise<{ doc: SourceDoc; pages: PageItem[] }> {
-  const task = pdfjs.getDocument({ data: bytes.slice(), ...DOC_OPTIONS });
+  const task = pdfjs.getDocument(docParams(bytes.slice()));
   let password: string | undefined;
   let cancelled = false;
   task.onPassword = (update: (pw: string) => void, reason: number) => {
@@ -55,22 +72,111 @@ export async function loadSource(
     throw e;
   }
   const doc: SourceDoc = { id: uid(), name, bytes, pdf, password };
-  const pages: PageItem[] = [];
-  for (let i = 0; i < pdf.numPages; i++) {
-    const page = await pdf.getPage(i + 1);
-    const vp = page.getViewport({ scale: 1 });
-    pages.push({
-      id: uid(),
-      src: doc.id,
-      index: i,
-      rotation: 0,
-      w: vp.width,
-      h: vp.height,
-      baseRotate: page.rotate,
-      m: vp.transform as PageItem['m'],
-    });
+  // Only the first pages are measured before the document opens; the rest
+  // start with the last measured size and are corrected by measureGuessed.
+  const n = pdf.numPages;
+  const first = await Promise.all(Array.from({ length: Math.min(n, MEASURE_FIRST) }, (_, i) => pdf.getPage(i + 1).then(geometryOf)));
+  const guess = first[first.length - 1];
+  const pages: PageItem[] = Array.from({ length: n }, (_, i) => ({ id: uid(), src: doc.id, index: i, rotation: 0, ...(first[i] ?? guess) }));
+  if (n > first.length) {
+    guesses.set(doc, { guess, from: first.length, left: new Set(pages.slice(first.length).map((p) => p.index)), real: new Map(), apply: null, pending: new Map() });
   }
   return { doc, pages };
+}
+
+/* ------------------------------------------------------------------ */
+/* Page geometry, measured lazily                                      */
+/* ------------------------------------------------------------------ */
+
+const MEASURE_FIRST = 4;
+const MEASURE_BATCH = 32;
+
+export type PageGeometry = Pick<PageItem, 'w' | 'h' | 'baseRotate' | 'm'>;
+
+function geometryOf(page: PDFPageProxy): PageGeometry {
+  const vp = page.getViewport({ scale: 1 });
+  return { w: vp.width, h: vp.height, baseRotate: page.rotate, m: vp.transform as Matrix };
+}
+
+const sameGeometry = (a: PageGeometry, b: PageGeometry) =>
+  a.baseRotate === b.baseRotate && Math.abs(a.w - b.w) < 0.01 && Math.abs(a.h - b.h) < 0.01 && a.m.every((v, i) => Math.abs(v - b.m[i]) < 0.01);
+
+interface Guesses {
+  /** The size pages were given until they are measured. */
+  guess: PageGeometry;
+  /** First page that got the guess; the ones before it were measured at open. */
+  from: number;
+  /** Pages not measured yet. */
+  left: Set<number>;
+  /** Measured pages whose real size differs from the guess. */
+  real: Map<number, PageGeometry>;
+  apply: ((changed: Map<number, PageGeometry>) => void) | null;
+  /** Corrections found before `apply` was set. */
+  pending: Map<number, PageGeometry>;
+}
+
+/** Documents with pages that opened with a guessed size. */
+const guesses = new WeakMap<SourceDoc, Guesses>();
+
+function record(g: Guesses, index: number, geo: PageGeometry, changed: Map<number, PageGeometry>) {
+  if (!g.left.delete(index) || sameGeometry(geo, g.guess)) return;
+  g.real.set(index, geo);
+  changed.set(index, geo);
+}
+
+function report(g: Guesses, changed: Map<number, PageGeometry>) {
+  if (!changed.size) return;
+  if (g.apply) g.apply(changed);
+  else for (const [i, geo] of changed) g.pending.set(i, geo);
+}
+
+/**
+ * Measures the pages of `doc` that opened with a guessed size, a batch at a
+ * time between other work, and hands the ones whose real size differs to
+ * `apply`. Pages shown before their turn are measured on the spot (pageMeasured).
+ */
+export async function measureGuessed(doc: SourceDoc, apply: (changed: Map<number, PageGeometry>) => void) {
+  const g = guesses.get(doc);
+  if (!g) return;
+  g.apply = apply;
+  report(g, new Map(g.pending));
+  g.pending.clear();
+  while (g.left.size) {
+    const batch = [...g.left].slice(0, MEASURE_BATCH);
+    let measured: PDFPageProxy[];
+    try {
+      measured = await Promise.all(batch.map((i) => doc.pdf.getPage(i + 1)));
+    } catch {
+      return; // the document was closed
+    }
+    const changed = new Map<number, PageGeometry>();
+    batch.forEach((i, k) => record(g, i, geometryOf(measured[k]), changed));
+    report(g, changed);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
+/** Called with each page as it's loaded for display, so its real size is used right away. */
+export function pageMeasured(doc: SourceDoc, index: number, page: PDFPageProxy) {
+  const g = guesses.get(doc);
+  if (!g?.left.has(index)) return;
+  const changed = new Map<number, PageGeometry>();
+  record(g, index, geometryOf(page), changed);
+  report(g, changed);
+}
+
+/** The pages with their real sizes, measuring any that still have a guess (for saving). */
+export async function settleGeometry(pages: PageItem[], docs: Record<string, SourceDoc>): Promise<PageItem[]> {
+  return Promise.all(
+    pages.map(async (p) => {
+      const doc = docs[p.src];
+      const g = doc && guesses.get(doc);
+      if (!g || p.index < g.from) return p;
+      if (g.left.has(p.index)) pageMeasured(doc, p.index, await doc.pdf.getPage(p.index + 1));
+      const real = g.real.get(p.index) ?? g.guess;
+      return sameGeometry(p, real) ? p : { ...p, ...real };
+    }),
+  );
 }
 
 export function viewportFor(page: PDFPageProxy, item: PageItem, scale: number) {

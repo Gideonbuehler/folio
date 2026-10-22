@@ -5,7 +5,7 @@ import type { Obj, PageItem } from '../types';
 import { actions, deleteObjects, updateObjects, useStore } from '../store';
 import { displaySize, objBounds, pageToDisplay } from '../lib/geometry';
 import { measureText } from '../lib/fonts';
-import { getText, IMAGE_RESOURCES, viewportFor } from '../lib/pdfjs';
+import { getText, IMAGE_RESOURCES, pageMeasured, viewportFor } from '../lib/pdfjs';
 import { linkServiceFor } from '../lib/links';
 import { getLive, pageLiveKeys, type LiveRender } from '../lib/live';
 import { Overlay } from './Overlay';
@@ -43,7 +43,10 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
 
   useEffect(() => {
     let alive = true;
-    doc?.pdf.getPage(page.index + 1).then((p) => alive && setPdfPage(p));
+    doc?.pdf.getPage(page.index + 1).then((p) => {
+      pageMeasured(doc, page.index, p);
+      if (alive) setPdfPage(p);
+    });
     return () => {
       alive = false;
     };

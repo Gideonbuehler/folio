@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import type { Dialog, DocMeta, Obj, PageItem, Rotation, SourceDoc, Tool, ToolStyle } from './types';
-import { getText, loadSource, PasswordCancelled, textItems } from './lib/pdfjs';
+import { getText, loadSource, measureGuessed, PasswordCancelled, textItems, type PageGeometry } from './lib/pdfjs';
 import { readFileBytes, uid } from './lib/util';
 import { forgetLiveSources } from './lib/live';
 import type { FileRef, Picked } from './lib/files';
@@ -479,6 +479,7 @@ export async function openDocuments(picked: Picked[]) {
       search: { query: '', matchCase: false, hits: [], active: -1, running: false },
     });
     blankDocs.clear();
+    for (const l of loaded) void measureGuessed(l.doc, (changed) => applyGeometry(l.doc.id, changed));
   } catch (e) {
     if (!(e instanceof PasswordCancelled)) {
       console.error(e);
@@ -623,6 +624,7 @@ export async function insertDocuments(picked: Picked[], at: number) {
       pages.splice(at, 0, ...added);
       return { pages };
     });
+    for (const d of Object.values(docs)) void measureGuessed(d, (changed) => applyGeometry(d.id, changed));
     toast(`Inserted ${added.length} page${added.length === 1 ? '' : 's'}`, 'success');
     scrollToPage(at);
   } catch (e) {
@@ -630,6 +632,33 @@ export async function insertDocuments(picked: Picked[], at: number) {
   } finally {
     set({ busy: null });
   }
+}
+
+/**
+ * Puts measured page sizes in place of the guesses a large document opened
+ * with (see loadSource), everywhere the pages appear, history included.
+ * Not an edit: nothing becomes undoable or dirty.
+ */
+function applyGeometry(src: string, changed: Map<number, PageGeometry>) {
+  const fixed = new Map<PageItem[], PageItem[]>();
+  const fix = (list: PageItem[]) => {
+    let out = fixed.get(list);
+    if (!out) {
+      const hit = (p: PageItem) => p.src === src && changed.has(p.index);
+      out = list.some(hit) ? list.map((p) => (hit(p) ? { ...p, ...changed.get(p.index)! } : p)) : list;
+      fixed.set(list, out);
+    }
+    return out;
+  };
+  const fixSnap = (sn: Snapshot) => {
+    const pages = fix(sn.pages);
+    return pages === sn.pages ? sn : { ...sn, pages };
+  };
+  const fixAll = (list: Snapshot[]) => {
+    const out = list.map(fixSnap);
+    return out.some((sn, i) => sn !== list[i]) ? out : list;
+  };
+  set((s) => ({ pages: fix(s.pages), past: fixAll(s.past), future: fixAll(s.future), gestureBase: s.gestureBase && fixSnap(s.gestureBase) }));
 }
 
 export function setMeta(meta: DocMeta) {

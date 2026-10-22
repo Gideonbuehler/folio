@@ -1,5 +1,6 @@
 // Builds sample PDFs for manual testing: text, images, a fillable form,
-// bookmarks, an internal link, a rotated page and a landscape page.
+// bookmarks, an internal link, a rotated page and a landscape page, plus a
+// page wrapped in form XObjects and a 500-page document.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -216,4 +217,106 @@ for (const label of ['Appendix A', 'Appendix B']) {
   p.drawText(label, { x: 72, y: 700, size: 26, font: ef, color: rgb(0.1, 0.45, 0.3) });
 }
 writeFileSync(join(out, 'appendix.pdf'), await extra.save());
+
+// A page drawn entirely through form XObjects, the way some exporters wrap
+// whole pages: text and images inside a form, a nested form, a form shared
+// with another page, and a small form drawn twice that inherits the page's
+// resources.
+{
+  const fd = await PDFDocument.create();
+  const ctx = fd.context;
+  const f1 = await fd.embedFont(StandardFonts.Helvetica);
+  const f2 = await fd.embedFont(StandardFonts.HelveticaBold);
+  const im1 = await fd.embedPng(landscape);
+  const im2 = await fd.embedPng(photo(11));
+  const im3 = await fd.embedPng(chart);
+  const esc = (s) => s.replace(/[\\()]/g, (c) => `\\${c}`);
+  const para = (x, y, size, lead, lines) =>
+    `BT /F1 ${size} Tf ${lead} TL ${x} ${y} Td ${lines.map((l, i) => `${i ? 'T* ' : ''}(${esc(l)}) Tj`).join(' ')} ET`;
+  const form = (content, bbox, extra = {}) => ctx.register(ctx.flateStream(content, { Type: 'XObject', Subtype: 'Form', BBox: bbox, ...extra }));
+
+  const nested = form(
+    [
+      para(0, 120, 12, 17, ['Nested form paragraph, line one of two.', 'The second line lives inside a form inside a form.']),
+      'q 120 0 0 80 330 10 cm /Im3 Do Q',
+    ].join('\n'),
+    [0, 0, 468, 150],
+    { Resources: { Font: { F1: f1.ref }, XObject: { Im3: im3.ref } } },
+  );
+  const pageForm = form(
+    [
+      'BT /F2 24 Tf 72 700 Td (Form-wrapped report) Tj ET',
+      para(72, 664, 12, 17, [
+        'Everything on this page is drawn by a form XObject, the way',
+        'some exporters wrap whole pages. Edit mode should still change',
+        'this paragraph, and saving should rewrite a copy of the form.',
+      ]),
+      para(72, 590, 12, 17, ['Account number 4417-1234-5678-9113 belongs to J. Smith.']),
+      'q 200 0 0 125 72 400 cm /Im1 Do Q',
+      // Cropped like a PowerPoint picture: clipped to a frame inside a q block.
+      'q 340 415 160 110 re W n 200 0 0 150 320 395 cm /Im2 Do Q',
+      'q 1 0 0 1 72 190 cm /FmNested Do Q',
+    ].join('\n'),
+    [0, 0, 612, 792],
+    { Resources: { Font: { F1: f1.ref, F2: f2.ref }, XObject: { Im1: im1.ref, Im2: im2.ref, FmNested: nested } } },
+  );
+  // No /Resources of its own: it uses the page's (allowed by older PDFs).
+  const logo = form(['0.15 0.3 0.7 rg 0 0 120 40 re f', 'BT /F2 18 Tf 1 1 1 rg 12 13 Td (ACME Corp) Tj ET'].join('\n'), [0, 0, 120, 40]);
+
+  const addPage = (content, resources) => {
+    const pg = fd.addPage([612, 792]);
+    pg.node.set(PDFName.of('Contents'), ctx.register(ctx.flateStream(content)));
+    pg.node.set(PDFName.of('Resources'), ctx.obj(resources));
+    return pg;
+  };
+  addPage('q 1 0 0 1 0 0 cm /FmPage Do Q', { XObject: { FmPage: pageForm } });
+  addPage('q /FmPage Do Q', { XObject: { FmPage: pageForm } });
+  addPage(
+    [
+      'BT /F1 14 Tf 72 700 Td (The same logo form, drawn twice:) Tj ET',
+      'q 1 0 0 1 72 600 cm /Logo Do Q',
+      'q 1 0 0 1 320 600 cm /Logo Do Q',
+    ].join('\n'),
+    { Font: { F1: f1.ref, F2: f2.ref }, XObject: { Logo: logo } },
+  );
+  writeFileSync(join(out, 'formwrapped.pdf'), await fd.save());
+}
+
+// A 500-page document for open-time, scrolling and export-memory checks:
+// mostly Letter with some A4, landscape and rotated pages, text on every
+// page, a shared image every tenth page and a bookmark every fifty.
+{
+  const big = await PDFDocument.create();
+  const bf1 = await big.embedFont(StandardFonts.Helvetica);
+  const bf2 = await big.embedFont(StandardFonts.HelveticaBold);
+  const bimg = await big.embedPng(landscape);
+  const words = LOREM.split(' ');
+  const pagesOut = [];
+  for (let n = 1; n <= 500; n++) {
+    const size = n % 50 === 0 ? [792, 612] : n % 25 === 0 ? [595.28, 841.89] : [612, 792];
+    const pg = big.addPage(size);
+    if (n === 100 || n === 300) pg.setRotation(degrees(90));
+    const [w, h] = size;
+    pg.drawText(`Page ${n}`, { x: 60, y: h - 70, size: 20, font: bf2 });
+    for (let i = 0; i < 34; i++) {
+      const line = Array.from({ length: 12 }, (_, k) => words[(n * 7 + i * 12 + k) % words.length]).join(' ');
+      pg.drawText(line, { x: 60, y: h - 110 - i * 17, size: 10.5, font: bf1, color: rgb(0.12, 0.12, 0.15) });
+    }
+    if (n % 10 === 0) pg.drawImage(bimg, { x: w - 260, y: 40, width: 200, height: 125 });
+    pagesOut.push(pg);
+  }
+  const bctx = big.context;
+  const broot = bctx.nextRef();
+  const marks = pagesOut.filter((_, i) => i % 50 === 0);
+  const brefs = marks.map(() => bctx.nextRef());
+  marks.forEach((page, i) => {
+    const d = bctx.obj({ Title: PDFHexString.fromText(`Pages ${i * 50 + 1}-${i * 50 + 50}`), Parent: broot, Dest: [page.ref, PDFName.of('Fit')] });
+    if (i > 0) d.set(PDFName.of('Prev'), brefs[i - 1]);
+    if (i < marks.length - 1) d.set(PDFName.of('Next'), brefs[i + 1]);
+    bctx.assign(brefs[i], d);
+  });
+  bctx.assign(broot, bctx.obj({ Type: 'Outlines', First: brefs[0], Last: brefs[brefs.length - 1], Count: PDFNumber.of(marks.length) }));
+  big.catalog.set(PDFName.of('Outlines'), broot);
+  writeFileSync(join(out, 'large.pdf'), await big.save());
+}
 console.log('samples written to', out);
