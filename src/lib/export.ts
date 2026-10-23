@@ -52,8 +52,9 @@ import { analyze, isolateImage, mul, overlap, pageContentBytes, parseContent, qu
 import { hexToRgb } from './util';
 import { fillMatchingBackground } from './sample';
 import { applyRedaction, hiddenByMarks, marksOn, planRedaction, type RedactionPlan } from './redact';
-import type { ReduceOptions, ReduceStats } from './reduce';
+import { reduceDocument, type ReduceOptions, type ReduceStats } from './reduce';
 import { addFormFields, type FieldEntry } from './formfields';
+import { clearSignatures } from './certsign';
 
 export interface ExportInput {
   docs: Record<string, SourceDoc>;
@@ -72,6 +73,8 @@ export interface ExportOptions {
   ownerPassword?: string;
   /** Downsample and recompress images, drop duplicate and private data. */
   reduce?: ReduceOptions;
+  /** Object and cross-reference streams (smaller); off for files about to be signed. */
+  objectStreams?: boolean;
   onProgress?: (text: string) => void;
 }
 
@@ -246,6 +249,12 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     rebuildAcroForm(out, outPages.map((p) => p.page), libDocs);
     addFormFields(out, fields, warnings);
   }
+  try {
+    // Signatures cover the original bytes; a rewritten file can't keep them.
+    if (clearSignatures(out)) warnings.add('Digital signatures were removed because the document was rewritten. Sign it again if needed.');
+  } catch (e) {
+    console.warn('Could not clear signatures', e);
+  }
   if (!opts.pageIds) {
     try {
       await writeOutline(out, input, pages, outPages.map((p) => p.page));
@@ -266,7 +275,6 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   collectGarbage(out);
   let reduced: ReduceStats | undefined;
   if (opts.reduce) {
-    const { reduceDocument } = await import('./reduce');
     reduced = await reduceDocument(out, opts.reduce, opts.onProgress);
     collectGarbage(out);
     opts.onProgress?.('Saving…');
@@ -278,7 +286,7 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
       permissions: { printing: 'highResolution', modifying: false, copying: true, annotating: true, fillingForms: true },
     });
   }
-  const bytes = await out.save({ useObjectStreams: true });
+  const bytes = await out.save({ useObjectStreams: opts.objectStreams ?? true });
   return { bytes, warnings: [...warnings], reduced };
 }
 

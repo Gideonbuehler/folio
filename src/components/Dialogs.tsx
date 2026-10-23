@@ -9,6 +9,7 @@ import { baseName, formatBytes, MOD, uid } from '../lib/util';
 import { Button, ColorButton, Field, Modal, Segmented, Slider, Toggle } from './ui';
 import { SignatureDialog } from './SignatureDialog';
 import { FieldDialog } from './FieldDialog';
+import { CertSignDialog, SignaturesDialog } from './CertSign';
 
 const close = () => actions.set({ dialog: null });
 
@@ -34,6 +35,10 @@ export function DialogHost() {
       return <ShortcutsDialog />;
     case 'field':
       return <FieldDialog id={dialog.id} />;
+    case 'certSign':
+      return <CertSignDialog />;
+    case 'signatures':
+      return <SignaturesDialog />;
   }
 }
 

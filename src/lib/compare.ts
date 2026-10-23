@@ -12,6 +12,7 @@ import { mergeLineRects, rectsIntersect } from './geometry';
 import { actions, toast, useStore } from '../store';
 import { loadSource, PasswordCancelled } from './pdfjs';
 import { pickFiles } from './files';
+import { untouchedDoc } from './commands';
 import { readFileBytes } from './util';
 
 const { get } = actions;
@@ -559,15 +560,8 @@ async function sideFrom(pdf: PDFDocumentProxy, name: string, owned: boolean, pro
 /** The open document as it is now: the original file, or what saving it would produce. */
 async function currentPdf(): Promise<{ pdf: PDFDocumentProxy; owned: boolean }> {
   const s = get();
-  const src = s.pages[0]?.src;
-  const doc = src ? s.docs[src] : undefined;
-  const untouched =
-    doc &&
-    !s.objects.length &&
-    s.pages.length === doc.pdf.numPages &&
-    s.pages.every((p, i) => p.src === src && p.index === i && p.rotation === 0) &&
-    doc.pdf.annotationStorage.size === 0;
-  if (untouched) return { pdf: doc.pdf, owned: false };
+  const doc = untouchedDoc();
+  if (doc) return { pdf: doc.pdf, owned: false };
   const { buildPdf } = await import('./export');
   const res = await buildPdf({ docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta });
   const { pdf } = (await loadSource(res.bytes, s.fileName, async () => null)).doc;

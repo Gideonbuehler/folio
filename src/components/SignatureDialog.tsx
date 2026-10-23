@@ -15,6 +15,11 @@ const SCRIPT_FONTS = [
 
 const INKS = ['#1a1a1a', '#1c3faa', '#c92a2a'];
 
+/** Signatures saved in Fill & sign, newest first. */
+export function savedSignatures(): string[] {
+  return loadSaved();
+}
+
 function loadSaved(): string[] {
   try {
     return JSON.parse(localStorage.getItem('folio.signatures') || '[]');

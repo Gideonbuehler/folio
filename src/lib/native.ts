@@ -55,6 +55,13 @@ export async function chooseSavePath(suggested: string): Promise<string | null> 
   return save({ defaultPath: suggested, filters });
 }
 
+/** A yes/no question with a custom confirm button. */
+export async function askConfirm(message: string, okLabel: string): Promise<boolean> {
+  if (!isDesktop) return window.confirm(message);
+  const { ask } = await dialog();
+  return ask(message, { title: 'Folio', kind: 'warning', okLabel, cancelLabel: 'Cancel' });
+}
+
 export async function askDiscard(): Promise<boolean> {
   const { ask } = await dialog();
   return ask('You have unsaved changes. Discard them?', { title: 'Folio', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Cancel' });

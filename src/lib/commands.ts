@@ -4,7 +4,8 @@ import { download, pickFiles, saveBytes } from './files';
 import { pdfjs } from './pdfjs';
 import { baseName, formatBytes, readFileDataUrl } from './util';
 import { insertImageFile } from './images';
-import { askDiscard, baseNameOf, isDesktop, readPath } from './native';
+import { askConfirm, askDiscard, baseNameOf, isDesktop, readPath } from './native';
+import { useSignatures } from './signatures';
 import type { ExportOptions } from './export';
 
 const { get, set } = actions;
@@ -75,13 +76,39 @@ function pdfName(name: string) {
   return /\.pdf$/i.test(name) ? name : `${name || 'Document'}.pdf`;
 }
 
+/** The single source document, if the open document is exactly that file, unchanged. */
+export function untouchedDoc() {
+  const s = get();
+  const src = s.pages[0]?.src;
+  const doc = src ? s.docs[src] : undefined;
+  if (!doc || s.objects.length || s.pages.length !== doc.pdf.numPages || doc.pdf.annotationStorage.size > 0) return null;
+  return s.pages.every((p, i) => p.src === src && p.index === i && p.rotation === 0) ? doc : null;
+}
+
+function signatureCount() {
+  const s = get();
+  const byDoc = useSignatures.getState().byDoc;
+  return [...new Set(s.pages.map((p) => p.src))].reduce((n, id) => n + (byDoc[id]?.length ?? 0), 0);
+}
+
 export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; name?: string } & ExportOptions = {}) {
   const s = get();
   if (!s.pages.length || s.busy) return;
   if (s.editing) set({ editing: null });
+  const plain = !opts.flattenForms && !opts.flattenComments && !opts.reduce && !opts.userPassword && !opts.ownerPassword && !opts.pageIds;
+  const signed = signatureCount();
+  const keep = signed > 0 && plain ? untouchedDoc() : null;
+  if (signed && !keep) {
+    const ok = await askConfirm(
+      `This document is digitally signed. Saving ${plain ? 'your changes' : 'with these options'} rewrites it, so the signature${signed === 1 ? '' : 's'} will be removed. Save anyway?`,
+      'Save',
+    );
+    if (!ok) return;
+  }
   set({ busy: 'Saving…' });
   try {
-    const res = await build(opts);
+    // An unchanged signed file is saved byte for byte, so its signatures stay valid.
+    const res = keep ? { bytes: keep.bytes, warnings: [] as string[], reduced: undefined } : await build(opts);
     set({ busy: null });
     const name = pdfName(opts.name ?? s.fileName);
     const forcePicker = !!opts.saveAs || !!opts.copy || !s.fileHandle;

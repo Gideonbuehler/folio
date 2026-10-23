@@ -27,13 +27,14 @@ import { liveKey } from '../lib/live';
 import type { Shown } from './PageView';
 import { defaultFieldRect, isFieldTool } from './FormTools';
 import { newField } from '../lib/forms';
+import { placeSignatureBox } from '../lib/certflow';
 
 const { get, set } = actions;
 
-const CAPTURE: Tool[] = ['editText', 'text', 'ink', 'rect', 'ellipse', 'line', 'arrow', 'note', 'whiteout', 'redact', ...(Object.keys(FIELD_TOOLS) as FieldTool[])];
+const CAPTURE: Tool[] = ['editText', 'text', 'ink', 'rect', 'ellipse', 'line', 'arrow', 'note', 'whiteout', 'redact', 'certSign', ...(Object.keys(FIELD_TOOLS) as FieldTool[])];
 
 type Draft =
-  | { kind: 'box'; tool: 'rect' | 'ellipse' | 'whiteout' | 'redact' | FieldTool; r: Rect }
+  | { kind: 'box'; tool: 'rect' | 'ellipse' | 'whiteout' | 'redact' | 'certSign' | FieldTool; r: Rect }
   | { kind: 'line'; tool: 'line' | 'arrow'; x1: number; y1: number; x2: number; y2: number }
   | { kind: 'ink'; pts: number[] };
 
@@ -397,6 +398,22 @@ export function Overlay({ page, zoom, objects, pdfPage, canvasRef, shown, holes,
       );
       return;
     }
+    if (t === 'certSign') {
+      let r: Rect = { x: start.x, y: start.y, w: 0, h: 0 };
+      setDraft({ kind: 'box', tool: t, r });
+      drag(
+        (p) => {
+          r = rectFromPoints(start, p);
+          setDraft({ kind: 'box', tool: t, r });
+        },
+        () => {
+          setDraft(null);
+          if (r.w < 24 || r.h < 12) r = { x: start.x - 90, y: start.y - 25, w: 180, h: 50 };
+          placeSignatureBox(page, r);
+        },
+      );
+      return;
+    }
     if (isFieldTool(t)) {
       const kind = FIELD_TOOLS[t];
       let r: Rect = { x: start.x, y: start.y, w: 0, h: 0 };
@@ -707,7 +724,7 @@ function DraftShape({ d }: { d: Draft }) {
     return <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} stroke={s.stroke} strokeWidth={s.width} strokeLinecap="round" opacity={0.8} />;
   }
   const { r } = d;
-  if (isFieldTool(d.tool)) return <rect x={r.x} y={r.y} width={r.w} height={r.h} className="draft-field" />;
+  if (isFieldTool(d.tool) || d.tool === 'certSign') return <rect x={r.x} y={r.y} width={r.w} height={r.h} className="draft-field" />;
   if (d.tool === 'whiteout') return <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="#fff" className="draft-outline" />;
   if (d.tool === 'redact') return <rect x={r.x} y={r.y} width={r.w} height={r.h} className="redact-box" />;
   const props = { fill: s.fill ?? 'none', stroke: s.stroke, strokeWidth: s.width, opacity: 0.85 };

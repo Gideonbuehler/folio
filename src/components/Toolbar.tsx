@@ -363,6 +363,9 @@ function ContextOptions() {
       </>
     );
   }
+  if (tool === 'certSign') {
+    controls = <span className="hint">Drag a box where the signature should appear, or click for the usual size · Esc to cancel</span>;
+  }
   if (kind === 'field') {
     controls = <FieldOptions selected={same.filter((o) => o.type === 'field')} tool={tool} />;
   }

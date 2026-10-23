@@ -58,6 +58,18 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 - Draw: pen, rectangle, ellipse, line, arrow, text boxes, images, whiteout.
 - Fill & sign: fill form fields, then draw, type or upload a signature, and add
   dates or check marks.
+- Sign with certificate (Tools menu): draw a box (or pick an empty signature
+  field), open your digital ID (.pfx/.p12; the password is typed into the
+  dialog, used once to open the file and never stored), choose a saved
+  handwritten signature or just the name, and Folio saves a signed copy. The
+  signature is PAdES baseline B-B (ETSI.CAdES.detached, SHA-256, RSA or EC),
+  added in an incremental update after all other changes, so its byte range
+  covers the whole file. An unchanged file is signed as is, so signatures
+  already in it stay valid (countersigning). Opening a signed PDF shows who
+  signed, when, and whether the file was changed since; saving an unchanged
+  signed file keeps it byte for byte, and saving edits warns first because
+  the rewritten file can't keep the old signatures. Folio checks the signed
+  bytes and the signature, not certificate authorities or revocation.
 - Create forms (F, or the form field button in the toolbar): drag to place
   text fields, multi-line text fields, check boxes, radio buttons (buttons with
   the same group name are one choice), dropdowns and signature fields. Set the
@@ -114,6 +126,9 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 - `src/lib/reduce.ts`: Reduce file size (runs at the end of `buildPdf`)
 - `src/lib/compare.ts`: page pairing, word diff and pixel diff behind
   `src/components/CompareView.tsx`
+- `src/lib/certsign.ts`: incremental signing and signature checks;
+  `src/lib/certs.ts` digital IDs and CMS (node-forge opens the .pfx/.p12,
+  Web Crypto signs and verifies), `src/lib/der.ts` the DER they need
 - `src/lib/formfields.ts`: writes designed form fields as AcroForm fields;
   `src/lib/forms.ts` names them and makes them fillable in place
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)

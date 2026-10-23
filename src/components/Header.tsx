@@ -2,6 +2,7 @@ import {
   BookOpen,
   Download,
   FileImage,
+  FileKey,
   FileOutput,
   FilePlus2,
   Files,
@@ -21,6 +22,7 @@ import {
   Redo2,
   Save,
   Search,
+  ShieldCheck,
   Signature,
   Stamp,
   Sun,
@@ -32,6 +34,7 @@ import {
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
 import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, printDocument, saveDocument } from '../lib/commands';
 import { compareWith } from '../lib/compare';
+import { startCertSign } from '../lib/certflow';
 import { MOD } from '../lib/util';
 import { canSaveInPlace } from '../lib/files';
 import { IconButton, MenuButton, Popover, usePopover, type MenuItem } from './ui';
@@ -83,6 +86,8 @@ export function Header() {
       { separator: true },
       { heading: 'Stamp & sign' },
       { label: 'Fill & sign…', icon: <Signature size={I} />, onClick: () => set({ dialog: { kind: 'signature' } }) },
+      { label: 'Sign with certificate…', icon: <FileKey size={I} />, onClick: startCertSign },
+      { label: 'Signatures…', icon: <ShieldCheck size={I} />, onClick: () => set({ dialog: { kind: 'signatures' } }) },
       { label: 'Watermark…', icon: <Stamp size={I} />, onClick: () => set({ dialog: { kind: 'watermark' } }) },
       { label: 'Page numbers & header/footer…', icon: <Hash size={I} />, onClick: () => set({ dialog: { kind: 'pageNumbers' } }) },
       { separator: true },

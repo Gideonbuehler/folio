@@ -33,6 +33,7 @@ import { Welcome } from './components/Welcome';
 import { DialogHost } from './components/Dialogs';
 import { TooltipLayer } from './components/Tooltip';
 import { CompareView } from './components/CompareView';
+import { SignatureBar } from './components/CertSign';
 import { useCompare } from './lib/compare';
 
 const { get, set } = actions;
@@ -69,7 +70,7 @@ export function App() {
     <div className="app">
       <Header />
       {hasDoc && !organize && !comparing && <Toolbar />}
-      <main className="main">{hasDoc ? comparing ? <CompareView /> : organize ? <OrganizeView /> : <><Sidebar /><Viewer /></> : <Welcome />}</main>
+      <main className="main">{hasDoc ? comparing ? <CompareView /> : organize ? <OrganizeView /> : <><Sidebar /><Viewer /><SignatureBar /></> : <Welcome />}</main>
       <DialogHost />
       <Toasts />
       <Busy />

@@ -364,3 +364,190 @@
   color: var(--accent-text);
   font-size: 12px;
 }
+
+/* ---------- Certificate signatures ---------- */
+
+.cert-target select {
+  flex: 1;
+  min-width: 0;
+}
+
+.cert-open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cert-file {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.cert-unlocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.cert-card {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.cert-icon {
+  color: var(--accent);
+  flex: none;
+  margin-top: 1px;
+}
+
+.cert-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cert-note {
+  color: #b35c00;
+}
+
+:root[data-theme='dark'] .cert-note {
+  color: #ffc078;
+}
+
+.cert-looks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cert-look {
+  width: 120px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.cert-look img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.cert-look.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cert-footnote {
+  max-width: 260px;
+}
+
+.sig-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(760px, calc(100% - 40px));
+  padding: 6px 8px 6px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.sig-bar > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sig-bar em {
+  font-style: normal;
+  color: var(--text-2);
+}
+
+.sig-bar.s-valid > svg,
+.sig-item.s-valid > svg {
+  color: #2b8a3e;
+}
+
+.sig-bar.s-modified > svg,
+.sig-bar.s-unknown > svg,
+.sig-item.s-modified > svg,
+.sig-item.s-unknown > svg {
+  color: #e67700;
+}
+
+.sig-bar.s-invalid > svg,
+.sig-item.s-invalid > svg {
+  color: #e03131;
+}
+
+:root[data-theme='dark'] .sig-bar.s-valid > svg,
+:root[data-theme='dark'] .sig-item.s-valid > svg {
+  color: #69db7c;
+}
+
+.sig-bar-btn {
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sig-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sig-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sig-item > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.sig-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}

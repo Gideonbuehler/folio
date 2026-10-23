@@ -198,6 +198,8 @@ export type Tool =
   | 'note'
   | 'whiteout'
   | 'redact'
+  /** Drawing the box for a certificate signature. */
+  | 'certSign'
   | FieldTool;
 
 export const FIELD_TOOLS = {
@@ -248,4 +250,6 @@ export type Dialog =
   | { kind: 'password'; name: string; retry: boolean; resolve: (pw: string | null) => void }
   | { kind: 'exportImages' }
   | { kind: 'field'; id: string }
+  | { kind: 'certSign' }
+  | { kind: 'signatures' }
   | { kind: 'shortcuts' };
