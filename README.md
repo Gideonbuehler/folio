@@ -59,8 +59,9 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   Sans, Serif and Mono for Arial/Helvetica, Times and Courier. Characters a font
   lacks fall back, per character, to Noto Sans, Noto Sans Symbols 2 and Droid
   Sans Fallback (Chinese, Japanese, Korean), so any text those cover saves as
-  real, searchable text. The fonts ship with the app (about 5.6 MB compressed;
-  see `public/fonts/README.md`), and saved files embed only the glyphs used.
+  real, searchable text. The fonts ship with the app and add 5.7 MiB to the
+  installer (3.9 to 9.6 MiB; see `public/fonts/README.md`). Saved files embed
+  only the glyphs used.
 - Annotate: highlight, underline, strikethrough (select text, or use the
   pop-up that appears), sticky notes, comments on anything. These are saved as
   real PDF annotations.

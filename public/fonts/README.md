@@ -29,6 +29,17 @@ Chrome's (and so WebView2's) font sanitizer rejects. The outlines are unchanged.
 | Droid Sans Fallback | 3.76 MB | 1.47 MB |
 | Total | 13.15 MB | 5.57 MB |
 
+Measured on the Windows build (`npm run app:build`), against the build of the
+commit before the fonts were added:
+
+| | Before | With the fonts | Added |
+| --- | --- | --- | --- |
+| Installer (`Folio_0.1.0_x64-setup.exe`) | 3.87 MiB | 9.59 MiB | 5.72 MiB |
+| Installed `folio.exe` | 5.95 MiB | 11.68 MiB | 5.73 MiB |
+
+That includes fontkit (about 0.15 MiB compressed), which subsets the fonts on
+save and checks a PDF's own fonts in Edit mode; it loads on first use.
+
 The editor only loads the faces a document needs (a Calibri paragraph loads
 Carlito and nothing else); the CJK fallback loads the first time such text
 appears.
