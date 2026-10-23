@@ -206,7 +206,7 @@ export type Dialog =
   | { kind: 'watermark' }
   | { kind: 'pageNumbers' }
   | { kind: 'properties' }
-  | { kind: 'save'; saveAs: boolean }
+  | { kind: 'save'; saveAs: boolean; reduce?: boolean }
   | { kind: 'password'; name: string; retry: boolean; resolve: (pw: string | null) => void }
   | { kind: 'exportImages' }
   | { kind: 'shortcuts' };

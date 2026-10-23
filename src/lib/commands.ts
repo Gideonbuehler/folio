@@ -2,7 +2,7 @@ import { zipSync } from 'fflate';
 import { actions, closeDocument, insertDocuments, openDocuments, toast } from '../store';
 import { download, pickFiles, saveBytes } from './files';
 import { pdfjs } from './pdfjs';
-import { baseName, readFileDataUrl } from './util';
+import { baseName, formatBytes, readFileDataUrl } from './util';
 import { insertImageFile } from './images';
 import { askDiscard, baseNameOf, isDesktop, readPath } from './native';
 import type { ExportOptions } from './export';
@@ -88,7 +88,8 @@ export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; nam
     const out = await saveBytes(res.bytes, name, opts.copy ? null : s.fileHandle, forcePicker);
     if (!out) return;
     if (!opts.copy) set({ dirty: false, fileHandle: out.handle ?? s.fileHandle, fileName: out.name });
-    toast(out.handle ? `Saved ${out.name}` : `Downloaded ${out.name}`, 'success');
+    if (opts.reduce) toast(reductionReport(currentSize(), res.bytes.length, res.reduced?.images ?? 0), 'success');
+    else toast(out.handle ? `Saved ${out.name}` : `Downloaded ${out.name}`, 'success');
     for (const w of res.warnings) toast(w, 'info');
   } catch (e) {
     console.error(e);
@@ -96,6 +97,19 @@ export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; nam
   } finally {
     set({ busy: null });
   }
+}
+
+/** Size of the file(s) the document was opened from. */
+export function currentSize() {
+  const s = get();
+  return [...new Set(s.pages.map((p) => p.src))].reduce((t, id) => t + (s.docs[id]?.bytes.length ?? 0), 0);
+}
+
+function reductionReport(before: number, after: number, images: number) {
+  const pics = images ? ` · ${images} image${images === 1 ? '' : 's'} optimized` : '';
+  if (after >= before) return `Saved at ${formatBytes(after)}: the file was already compact${pics}`;
+  const pct = Math.round((1 - after / before) * 100);
+  return `Reduced from ${formatBytes(before)} to ${formatBytes(after)} (−${pct}%)${pics}`;
 }
 
 export async function extractPages(pageIds: string[]) {

@@ -71,6 +71,12 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   stencil masks), that page alone is flattened to an image, with a warning.
 - Watermarks, page numbers, headers and footers, document properties, password
   protection (AES-256), export pages as PNG/JPEG, and print.
+- Reduce file size (File menu, or Save with options): images shown at more
+  than the chosen resolution (150, 220 or 300 dpi) are downsampled, large photos
+  without transparency are stored as JPEG, identical images, fonts and other
+  streams are stored once, uncompressed streams are compressed, and embedded
+  thumbnails and other applications' private data are dropped. The toast after
+  saving reports the size before and after.
 
 ## Known limits
 
@@ -89,6 +95,7 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 - `src/lib/content.ts`: content-stream tokenizer, interpreter and rewriter
   behind Edit mode saves
 - `src/lib/export.ts`: builds the output PDF
+- `src/lib/reduce.ts`: Reduce file size (runs at the end of `buildPdf`)
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
 - `scripts/make-samples.mjs`: generates the test PDFs in `public/samples/`.
   Open one with `?file=/samples/sample.pdf`.

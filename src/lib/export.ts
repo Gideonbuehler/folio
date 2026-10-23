@@ -52,6 +52,7 @@ import { analyze, isolateImage, mul, overlap, pageContentBytes, parseContent, qu
 import { hexToRgb } from './util';
 import { fillMatchingBackground } from './sample';
 import { applyRedaction, hiddenByMarks, marksOn, planRedaction, type RedactionPlan } from './redact';
+import type { ReduceOptions, ReduceStats } from './reduce';
 
 export interface ExportInput {
   docs: Record<string, SourceDoc>;
@@ -68,12 +69,15 @@ export interface ExportOptions {
   flattenComments?: boolean;
   userPassword?: string;
   ownerPassword?: string;
+  /** Downsample and recompress images, drop duplicate and private data. */
+  reduce?: ReduceOptions;
   onProgress?: (text: string) => void;
 }
 
 export interface ExportResult {
   bytes: Uint8Array;
   warnings: string[];
+  reduced?: ReduceStats;
 }
 
 const REDACT_SCALE = 2.5; // ~180 dpi raster for redacted pages
@@ -252,6 +256,13 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   opts.onProgress?.('Saving…');
   await out.flush();
   collectGarbage(out);
+  let reduced: ReduceStats | undefined;
+  if (opts.reduce) {
+    const { reduceDocument } = await import('./reduce');
+    reduced = await reduceDocument(out, opts.reduce, opts.onProgress);
+    collectGarbage(out);
+    opts.onProgress?.('Saving…');
+  }
   if (opts.userPassword || opts.ownerPassword) {
     out.encrypt({
       userPassword: opts.userPassword ?? '',
@@ -260,7 +271,7 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     });
   }
   const bytes = await out.save({ useObjectStreams: true });
-  return { bytes, warnings: [...warnings] };
+  return { bytes, warnings: [...warnings], reduced };
 }
 
 export async function loadLib(bytes: Uint8Array, password?: string) {

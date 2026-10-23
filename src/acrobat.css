@@ -1,0 +1,16 @@
+/* ==================================================================
+   Reduce file size, form fields, compare and certificate signatures
+   ================================================================== */
+
+/* ---------- Reduce file size (Save dialog) ---------- */
+
+.reduce-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -2px 0 10px 42px;
+}
+
+.reduce-options p {
+  margin: 0;
+}
