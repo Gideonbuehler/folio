@@ -66,9 +66,12 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   new copy. Vector shapes mostly inside a mark and annotations touching one
   are deleted. Fill marks with a solid color (black by default) or **Match
   background**, which rebuilds the area from the surrounding pixels. Hover
-  over a mark to see what's underneath before saving. If a page draws content
-  that can't be removed precisely under a mark (form XObjects, partly covered
-  stencil masks), that page alone is flattened to an image, with a warning.
+  over a mark to see what's underneath before saving. Content inside form
+  XObjects (grouped content, or whole pages some exporters wrap in one) is
+  redacted the same way, in a copy of the form for that page only. If a page
+  draws content that can't be removed precisely under a mark (a form that
+  can't be read, partly covered stencil masks), that page alone is flattened
+  to an image, with a warning.
 - Watermarks, page numbers, headers and footers, document properties, password
   protection (AES-256), export pages as PNG/JPEG, and print.
 
@@ -76,9 +79,11 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 
 - Replaced text is set in Helvetica, Times or Courier (closest match to the
   original). Its width is matched with horizontal scaling.
-- Text or images inside form XObjects, or in unusual encodings, can't be
-  removed from the content stream. Only those edits fall back to covering the
-  original with a patch of the page's background color.
+- Text or images in unusual encodings, or inside form XObjects that can't be
+  read, can't be removed from the content stream. Only those edits fall back
+  to covering the original with a patch of the page's background color.
+  Editing inside a form XObject writes a copy of it for that page, so other
+  pages drawing the same form are unaffected.
 - Effects drawn as separate objects, like the reflections under photos in some
   brochures, stay where they are when you move the photo. Move them separately,
   as you would in Acrobat.
@@ -90,5 +95,6 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   behind Edit mode saves
 - `src/lib/export.ts`: builds the output PDF
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
-- `scripts/make-samples.mjs`: generates the test PDFs in `public/samples/`.
-  Open one with `?file=/samples/sample.pdf`.
+- `scripts/make-samples.mjs`: generates the test PDFs in `public/samples/`,
+  including a page wrapped in form XObjects and a 500-page document. Open one
+  with `?file=/samples/sample.pdf`.

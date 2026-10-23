@@ -48,7 +48,7 @@ import { AnnotationMode } from 'pdfjs-dist';
 import type { DocMeta, FillObj, FontFamily, ImageObj, Matrix, Obj, PageItem, Rect, SourceDoc, TextObj } from '../types';
 import { applyMatrix, arrowHead, invertMatrix, markupQuads, NOTE_SIZE } from './geometry';
 import { firstBaseline, layoutText, LINE_HEIGHT, measureText, TEXT_PAD } from './fonts';
-import { analyze, isolateImage, mul, overlap, pageContentBytes, parseContent, quadRect, rewrite, setPageContent, silenceRun, wrapInTransform } from './content';
+import { analyzePage, ContentEdits, isolateImage, mul, overlap, quadRect, silenceRun, wrapInTransform, type ImageHit } from './content';
 import { hexToRgb } from './util';
 import { fillMatchingBackground } from './sample';
 import { applyRedaction, hiddenByMarks, marksOn, planRedaction, type RedactionPlan } from './redact';
@@ -537,17 +537,16 @@ function iou(a: Rect, b: Rect) {
  * content stream. Returns the ids of objects fully handled this way; anything
  * else falls back to being covered.
  */
-export function applyContentEdits(doc: PDFDocument, page: PDFPage, m: Matrix, objs: Obj[]): Set<string> {
+export function applyContentEdits(_doc: PDFDocument, page: PDFPage, m: Matrix, objs: Obj[]): Set<string> {
   const native = new Set<string>();
   const texts = objs.filter((o): o is TextObj => o.type === 'text' && !!o.cover);
   const erases = objs.filter((o): o is FillObj => o.type === 'whiteout' && !!o.erase);
   const moves = objs.filter((o): o is ImageObj => o.type === 'image' && !!o.orig);
   if (!texts.length && !erases.length && !moves.length) return native;
-  const bytes = pageContentBytes(page);
-  if (!bytes) return native;
-  const analysis = analyze(parseContent(bytes), doc, page.node.Resources());
-  const { ops, runs, images } = analysis;
-  const reps = new Map<number, string | Uint8Array>();
+  const analysis = analyzePage(page);
+  if (!analysis) return native;
+  const { runs, images } = analysis;
+  const edits = new ContentEdits(page);
   const runRects = runs.map((r) => ({ r, rect: quadRect(r.quad, m) }));
   const imageRects = images.map((im) => ({ im, rect: quadRect(im.quad, m) }));
 
@@ -557,7 +556,7 @@ export function applyContentEdits(doc: PDFDocument, page: PDFPage, m: Matrix, ob
     for (const { r, rect } of runRects) {
       const a = rect.w * rect.h;
       if (a <= 0 || overlap(rect, area) / a < 0.85) continue;
-      if (!reps.has(r.index)) reps.set(r.index, silenceRun(ops[r.index], r));
+      if (!edits.has(r.node, r.index)) edits.set(r.node, r.index, silenceRun(r.node.ops[r.index], r));
       removed += a;
     }
     return removed;
@@ -573,25 +572,25 @@ export function applyContentEdits(doc: PDFDocument, page: PDFPage, m: Matrix, ob
     } else {
       for (const { im, rect } of imageRects) {
         if (iou(rect, e) > 0.85) {
-          reps.set(im.index, '');
+          edits.set(im.node, im.index, '');
           native.add(e.id);
         }
       }
     }
   }
-  const used = new Set<number>();
+  const used = new Set<ImageHit>();
   for (const o of moves) {
     let best: (typeof imageRects)[number] | null = null;
     let score = 0.85;
     for (const cand of imageRects) {
       const sc = iou(cand.rect, o.orig!);
-      if (sc > score && !used.has(cand.im.index)) {
+      if (sc > score && !used.has(cand.im)) {
         score = sc;
         best = cand;
       }
     }
     if (!best) continue;
-    used.add(best.im.index);
+    used.add(best.im);
     native.add(o.id);
     if (sameRect(o, o.orig!)) continue;
     // Map the old spot onto the new one in page space, then express that as an
@@ -601,12 +600,15 @@ export function applyContentEdits(doc: PDFDocument, page: PDFPage, m: Matrix, ob
     const sy = o.h / r0.h;
     const pageMove: Matrix = [sx, 0, 0, sy, o.x - r0.x * sx, o.y - r0.y * sy];
     const userMove = mul(mul(m, pageMove), invertMatrix(m));
-    const range = isolateImage(analysis, best.im);
+    const { node } = best.im;
+    const range = isolateImage(best.im);
     const ctm = range.ctm;
-    reps.set(range.start, wrapInTransform(bytes, ops[range.start], ops[range.end], mul(mul(ctm, userMove), invertMatrix(ctm))));
-    for (let k = range.start + 1; k <= range.end; k++) reps.set(k, '');
+    edits.set(node, range.start, wrapInTransform(node.bytes, node.ops[range.start], node.ops[range.end], mul(mul(ctm, userMove), invertMatrix(ctm))));
+    for (let k = range.start + 1; k <= range.end; k++) edits.set(node, k, '');
+    // Inside a form, the image may now reach past the form's box.
+    edits.include(node, best.im.quad.map((p) => applyMatrix(userMove, p.x, p.y)));
   }
-  if (reps.size) setPageContent(page, rewrite(bytes, ops, reps));
+  if (edits.size) edits.commit();
   return native;
 }
 
