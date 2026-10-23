@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import { ArrowDownToLine, ArrowUpToLine, Copy, MessageSquarePlus, Trash2 } from 'lucide-react';
-import type { ImageObj, InkObj, Obj, PageItem, Point, Rect, TextObj, Tool } from '../types';
+import { FIELD_TOOLS, type FieldTool, type ImageObj, type InkObj, type Obj, type PageItem, type Point, type Rect, type TextObj, type Tool } from '../types';
 import {
   actions,
   beginGesture,
@@ -25,13 +25,15 @@ import { BaseShape, CoverShape, cssTransform, HighlightShape, inkPath, NoteView,
 import { ContextMenu, type MenuItem } from './ui';
 import { liveKey } from '../lib/live';
 import type { Shown } from './PageView';
+import { defaultFieldRect, isFieldTool } from './FormTools';
+import { newField } from '../lib/forms';
 
 const { get, set } = actions;
 
-const CAPTURE: Tool[] = ['editText', 'text', 'ink', 'rect', 'ellipse', 'line', 'arrow', 'note', 'whiteout', 'redact'];
+const CAPTURE: Tool[] = ['editText', 'text', 'ink', 'rect', 'ellipse', 'line', 'arrow', 'note', 'whiteout', 'redact', ...(Object.keys(FIELD_TOOLS) as FieldTool[])];
 
 type Draft =
-  | { kind: 'box'; tool: 'rect' | 'ellipse' | 'whiteout' | 'redact'; r: Rect }
+  | { kind: 'box'; tool: 'rect' | 'ellipse' | 'whiteout' | 'redact' | FieldTool; r: Rect }
   | { kind: 'line'; tool: 'line' | 'arrow'; x1: number; y1: number; x2: number; y2: number }
   | { kind: 'ink'; pts: number[] };
 
@@ -395,6 +397,36 @@ export function Overlay({ page, zoom, objects, pdfPage, canvasRef, shown, holes,
       );
       return;
     }
+    if (isFieldTool(t)) {
+      const kind = FIELD_TOOLS[t];
+      let r: Rect = { x: start.x, y: start.y, w: 0, h: 0 };
+      setDraft({ kind: 'box', tool: t, r });
+      drag(
+        (p, e) => {
+          let q = p;
+          if (e.shiftKey || kind === 'checkbox' || kind === 'radio') {
+            const d = Math.max(Math.abs(p.x - start.x), Math.abs(p.y - start.y));
+            q = { x: start.x + Math.sign(p.x - start.x || 1) * d, y: start.y + Math.sign(p.y - start.y || 1) * d };
+          }
+          r = rectFromPoints(start, q);
+          setDraft({ kind: 'box', tool: t, r });
+        },
+        () => {
+          setDraft(null);
+          const o = newField(kind, page, r.w < 6 || r.h < 6 ? defaultFieldRect(kind, start) : r);
+          if (r.w < 6 || r.h < 6) {
+            // A click places the usual size, centered there (radio buttons match their group).
+            o.x = start.x - o.w / 2;
+            o.y = start.y - o.h / 2;
+          }
+          commit((st) => ({ objects: [...st.objects, o] }));
+          set({ selection: [o.id] });
+          // Radio buttons usually come several at a time; the tool stays on for them.
+          if (kind !== 'radio') set({ tool: 'select' });
+        },
+      );
+      return;
+    }
     if (t === 'rect' || t === 'ellipse' || t === 'whiteout' || t === 'redact') {
       let r: Rect = { x: start.x, y: start.y, w: 0, h: 0 };
       setDraft({ kind: 'box', tool: t, r });
@@ -541,6 +573,7 @@ export function Overlay({ page, zoom, objects, pdfPage, canvasRef, shown, holes,
     if (!obj) return;
     e.stopPropagation();
     if (obj.type === 'text') set({ selection: [obj.id], editing: obj.id });
+    else if (obj.type === 'field') set({ selection: [obj.id], dialog: { kind: 'field', id: obj.id } });
     else set({ selection: [obj.id], openNote: obj.id });
   };
 
@@ -674,6 +707,7 @@ function DraftShape({ d }: { d: Draft }) {
     return <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} stroke={s.stroke} strokeWidth={s.width} strokeLinecap="round" opacity={0.8} />;
   }
   const { r } = d;
+  if (isFieldTool(d.tool)) return <rect x={r.x} y={r.y} width={r.w} height={r.h} className="draft-field" />;
   if (d.tool === 'whiteout') return <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="#fff" className="draft-outline" />;
   if (d.tool === 'redact') return <rect x={r.x} y={r.y} width={r.w} height={r.h} className="redact-box" />;
   const props = { fill: s.fill ?? 'none', stroke: s.stroke, strokeWidth: s.width, opacity: 0.85 };

@@ -8,6 +8,7 @@ import { FONT_LABEL, measureText } from '../lib/fonts';
 import { baseName, formatBytes, MOD, uid } from '../lib/util';
 import { Button, ColorButton, Field, Modal, Segmented, Slider, Toggle } from './ui';
 import { SignatureDialog } from './SignatureDialog';
+import { FieldDialog } from './FieldDialog';
 
 const close = () => actions.set({ dialog: null });
 
@@ -31,6 +32,8 @@ export function DialogHost() {
       return <ExportImagesDialog />;
     case 'shortcuts':
       return <ShortcutsDialog />;
+    case 'field':
+      return <FieldDialog id={dialog.id} />;
   }
 }
 
@@ -577,6 +580,7 @@ const SHORTCUTS: [string, string][] = [
   ['Line / Arrow', 'L / A'],
   ['Insert image / Fill & sign', 'I / S'],
   ['Whiteout / Redact', 'W / X'],
+  ['Text form field', 'F'],
   ['Open', `${MOD}+O`],
   ['Save / Save as', `${MOD}+S / ${MOD}+Shift+S`],
   ['Print', `${MOD}+P`],

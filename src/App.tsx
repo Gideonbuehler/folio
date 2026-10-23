@@ -49,6 +49,7 @@ const TOOL_KEYS: Record<string, Tool> = {
   a: 'arrow',
   w: 'whiteout',
   x: 'redact',
+  f: 'fieldText',
 };
 
 export function App() {

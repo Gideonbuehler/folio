@@ -58,6 +58,14 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 - Draw: pen, rectangle, ellipse, line, arrow, text boxes, images, whiteout.
 - Fill & sign: fill form fields, then draw, type or upload a signature, and add
   dates or check marks.
+- Create forms (F, or the form field button in the toolbar): drag to place
+  text fields, multi-line text fields, check boxes, radio buttons (buttons with
+  the same group name are one choice), dropdowns and signature fields. Set the
+  name, tooltip, required flag, default value, font size and choices in the
+  context bar or the properties dialog (double-click a field). Saving writes
+  real AcroForm fields with appearances, fillable in any reader; "Make fields
+  fillable now" does the same in place so you can fill them in Folio straight
+  away (Undo turns them back into editable designs).
 - Organize: reorder by dragging thumbnails; rotate, duplicate, insert, extract
   and delete pages; combine several PDFs.
 - Redact: only what lies under a mark is removed, as in Acrobat. Glyphs
@@ -96,6 +104,8 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   behind Edit mode saves
 - `src/lib/export.ts`: builds the output PDF
 - `src/lib/reduce.ts`: Reduce file size (runs at the end of `buildPdf`)
+- `src/lib/formfields.ts`: writes designed form fields as AcroForm fields;
+  `src/lib/forms.ts` names them and makes them fillable in place
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
 - `scripts/make-samples.mjs`: generates the test PDFs in `public/samples/`.
   Open one with `?file=/samples/sample.pdf`.

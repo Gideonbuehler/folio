@@ -14,3 +14,65 @@
 .reduce-options p {
   margin: 0;
 }
+
+/* ---------- Form fields being designed ---------- */
+
+.form-field .field-tint {
+  fill: var(--accent);
+  fill-opacity: 0.07;
+  stroke: var(--accent);
+  stroke-opacity: 0.55;
+  stroke-width: 1px;
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.form-field .field-label {
+  fill: #4c5fd5;
+  font-family: var(--font);
+  font-style: italic;
+}
+
+.form-field .field-label.outside {
+  pointer-events: none;
+}
+
+.form-field .field-required {
+  fill: #e03131;
+  font-family: var(--font);
+  font-weight: 700;
+}
+
+.static-objects .form-field .field-label.outside {
+  display: none;
+}
+
+.field-name-input {
+  width: 150px;
+  height: 30px;
+}
+
+.draft-field {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-dasharray: 4 3;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.textarea {
+  height: auto;
+  min-height: 60px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  resize: vertical;
+  font: inherit;
+}
+
+.field-size-row {
+  align-items: center;
+}
+
+.field-size {
+  width: 96px;
+}

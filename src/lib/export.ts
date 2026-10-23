@@ -53,6 +53,7 @@ import { hexToRgb } from './util';
 import { fillMatchingBackground } from './sample';
 import { applyRedaction, hiddenByMarks, marksOn, planRedaction, type RedactionPlan } from './redact';
 import type { ReduceOptions, ReduceStats } from './reduce';
+import { addFormFields, type FieldEntry } from './formfields';
 
 export interface ExportInput {
   docs: Record<string, SourceDoc>;
@@ -188,6 +189,7 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   }
 
   /* 4. Draw objects and add annotations. */
+  const fields: FieldEntry[] = [];
   for (const [i, { item, page, m, raster }] of outPages.entries()) {
     const objs = byPage.get(item.id);
     if (!objs?.length) continue;
@@ -214,6 +216,10 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     for (const o of objs) {
       // Anything of ours that sits mostly under a redaction mark is left out too.
       if (hiddenByMarks(o, marks)) continue;
+      if (o.type === 'field') {
+        fields.push({ o, page, m });
+        continue;
+      }
       const isComment = o.type === 'highlight' || o.type === 'underline' || o.type === 'strike' || o.type === 'note';
       if (isComment && !opts.flattenComments) annots.push(o);
       else if (o.type === 'note') continue;
@@ -230,6 +236,7 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   if (opts.flattenForms) {
     try {
       rebuildAcroForm(out, outPages.map((p) => p.page), libDocs);
+      addFormFields(out, fields, warnings);
       out.getForm().flatten();
     } catch (e) {
       console.warn(e);
@@ -237,6 +244,7 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     }
   } else {
     rebuildAcroForm(out, outPages.map((p) => p.page), libDocs);
+    addFormFields(out, fields, warnings);
   }
   if (!opts.pageIds) {
     try {
@@ -486,6 +494,7 @@ async function objectOps(page: PDFPage, o: Obj, res: Resources): Promise<PDFOper
       return ops;
     }
     case 'note':
+    case 'field':
       return [];
   }
 }

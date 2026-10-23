@@ -30,7 +30,8 @@ import { FONT_LABEL } from '../lib/fonts';
 import { pickAndInsertImage } from '../lib/commands';
 import { ColorButton, HIGHLIGHT_PALETTE, IconButton, Popover, Segmented, SliderButton, usePopover } from './ui';
 import { backgroundColorAt } from '../lib/sample';
-import { OBJ_LABEL } from './labels';
+import { FIELD_LABEL, OBJ_LABEL } from './labels';
+import { FieldOptions, FieldsButton, isFieldTool } from './FormTools';
 
 interface ToolDef {
   id: Tool;
@@ -48,7 +49,7 @@ const SHAPES: ToolDef[] = [
   { id: 'arrow', label: 'Arrow', key: 'A', icon: <ArrowUpRight size={S} /> },
 ];
 
-const GROUPS: (ToolDef | 'shapes' | 'insert')[][] = [
+const GROUPS: (ToolDef | 'shapes' | 'insert' | 'fields')[][] = [
   [
     { id: 'select', label: 'Select', key: 'V', icon: <MousePointer2 size={S} /> },
     { id: 'hand', label: 'Hand', key: 'H', icon: <Hand size={S} /> },
@@ -64,7 +65,7 @@ const GROUPS: (ToolDef | 'shapes' | 'insert')[][] = [
     { id: 'note', label: 'Sticky note', key: 'N', icon: <MessageSquarePlus size={S} /> },
   ],
   [{ id: 'ink', label: 'Draw', key: 'D', icon: <PenLine size={S} /> }, 'shapes'],
-  ['insert'],
+  ['insert', 'fields'],
   [
     { id: 'whiteout', label: 'Whiteout', key: 'W', icon: <Eraser size={S} /> },
     { id: 'redact', label: 'Redact', key: 'X', icon: <EyeOff size={S} /> },
@@ -83,6 +84,8 @@ export function Toolbar() {
                 <ShapesButton key="shapes" />
               ) : t === 'insert' ? (
                 <InsertButtons key="insert" />
+              ) : t === 'fields' ? (
+                <FieldsButton key="fields" />
               ) : t.id === 'editText' ? (
                 <button
                   key={ti}
@@ -166,9 +169,10 @@ function InsertButtons() {
 /* Contextual options: what the selection or the active tool can change */
 /* ------------------------------------------------------------------ */
 
-type Kind = 'shape' | 'line' | 'ink' | 'text' | 'markup' | 'note' | 'image' | 'whiteout' | 'redact' | 'none';
+type Kind = 'shape' | 'line' | 'ink' | 'text' | 'markup' | 'note' | 'image' | 'whiteout' | 'redact' | 'field' | 'none';
 
 function kindOf(t: Obj['type'] | Tool): Kind {
+  if (t === 'field' || isFieldTool(t)) return 'field';
   switch (t) {
     case 'rect':
     case 'ellipse':
@@ -359,6 +363,9 @@ function ContextOptions() {
       </>
     );
   }
+  if (kind === 'field') {
+    controls = <FieldOptions selected={same.filter((o) => o.type === 'field')} tool={tool} />;
+  }
   if (tool === 'editText' && !subject) {
     controls = <span className="hint">Click any text to rewrite it · drag an image to move it · Delete removes the selection</span>;
   }
@@ -367,7 +374,9 @@ function ContextOptions() {
 
   return (
     <div className="context-options">
-      {subject && <span className="context-label">{selected.length > 1 ? `${selected.length} selected` : OBJ_LABEL[subject.type]}</span>}
+      {subject && (
+        <span className="context-label">{selected.length > 1 ? `${selected.length} selected` : subject.type === 'field' ? FIELD_LABEL[subject.kind] : OBJ_LABEL[subject.type]}</span>
+      )}
       {controls}
       {selected.length > 0 && (
         <>
