@@ -2,10 +2,11 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSPr
 import { AnnotationLayer, AnnotationMode, TextLayer, type PDFPageProxy, type RenderTask } from 'pdfjs-dist';
 import { Trash2, X } from 'lucide-react';
 import type { Obj, PageItem } from '../types';
-import { actions, deleteObjects, updateObjects, useStore } from '../store';
+import { actions, deleteObjects, refreshSearchPage, searchIsStale, updateObjects, useStore } from '../store';
 import { displaySize, objBounds, pageToDisplay } from '../lib/geometry';
 import { measureText } from '../lib/fonts';
-import { getText, IMAGE_RESOURCES, pageMeasured, viewportFor } from '../lib/pdfjs';
+import { IMAGE_RESOURCES, pageMeasured, viewportFor } from '../lib/pdfjs';
+import { pageText, pageTextKey } from '../lib/pagetext';
 import { linkServiceFor } from '../lib/links';
 import { getLive, pageLiveKeys, type LiveRender } from '../lib/live';
 import { Overlay } from './Overlay';
@@ -138,34 +139,49 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, page, zoom]);
 
-  /* Text layer: built once per page/rotation; zoom is handled by CSS variables. */
+  /*
+   * Text layer: what the page shows now, so selecting, copying and searching
+   * use rewritten paragraphs and text boxes instead of the original wording.
+   * Rebuilt when that text changes; zoom is handled by CSS variables.
+   */
+  const textKey = useMemo(() => pageTextKey(objects), [objects]);
+  const [layerKey, setLayerKey] = useState<string | null>(null);
   useEffect(() => {
     const div = textRef.current;
     if (!pdfPage || !div || !doc) return;
-    div.replaceChildren();
     let alive = true;
     let layer: TextLayer | null = null;
-    getText(doc, page.index).then(async (tc) => {
-      if (!alive) return;
-      layer = new TextLayer({ textContentSource: tc, container: div, viewport: viewportFor(pdfPage, page, actions.get().zoom) });
-      try {
-        await layer.render();
-      } catch {
-        return;
-      }
-      if (!alive) return;
-      const end = document.createElement('div');
-      end.className = 'endOfContent';
-      div.append(end);
-      setTextLayer(layer);
-    });
+    // Typing and dragging change the text often; wait for a pause.
+    const t = setTimeout(
+      () => {
+        pageText(doc, page, objects).then(async ({ key, content }) => {
+          if (!alive) return;
+          div.replaceChildren();
+          layer = new TextLayer({ textContentSource: content, container: div, viewport: viewportFor(pdfPage, page, actions.get().zoom) });
+          try {
+            await layer.render();
+          } catch {
+            return;
+          }
+          if (!alive) return;
+          const end = document.createElement('div');
+          end.className = 'endOfContent';
+          div.append(end);
+          setTextLayer(layer);
+          setLayerKey(key);
+          if (searchIsStale(page.id, key)) void refreshSearchPage(page.id);
+        });
+      },
+      textKey ? 250 : 0,
+    );
     return () => {
       alive = false;
+      clearTimeout(t);
       layer?.cancel();
-      setTextLayer(null);
     };
+    // The page's objects matter only through textKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfPage, doc, page.index, page.rotation]);
+  }, [pdfPage, doc, page.index, page.rotation, page.m, textKey]);
 
   useEffect(() => {
     if (!textLayer || !pdfPage) return;
@@ -235,7 +251,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
     <div ref={pageRef} className={`page ${rendered ? 'rendered' : ''}`} style={style} data-page-id={page.id} data-page-index={index}>
       <canvas ref={canvasRef} className="page-canvas" />
       <div ref={textRef} className="textLayer" />
-      <SearchHits page={page} zoom={zoom} textLayer={textLayer} pageRef={pageRef} />
+      <SearchHits page={page} zoom={zoom} textLayer={textLayer} layerKey={layerKey} pageRef={pageRef} />
       <div ref={annotRef} className="annotationLayer" />
       <Overlay page={page} zoom={zoom} objects={objects} pdfPage={pdfPage} canvasRef={canvasRef} shown={shown} holes={holes} liveFailed={liveFailed} canvasVersion={canvasVersion} />
       <CommentPopup page={page} zoom={zoom} objects={objects} />
@@ -250,11 +266,14 @@ function SearchHits({
   page,
   zoom,
   textLayer,
+  layerKey,
   pageRef,
 }: {
   page: PageItem;
   zoom: number;
   textLayer: TextLayer | null;
+  /** Which text the layer shows; hits found in other text would land on the wrong words. */
+  layerKey: string | null;
   pageRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const hits = useStore((s) => s.search.hits);
@@ -264,7 +283,7 @@ function SearchHits({
   const activeRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    if (!textLayer || !pageRef.current) {
+    if (!textLayer || !pageRef.current || layerKey === null || searchIsStale(page.id, layerKey)) {
       setRects([]);
       return;
     }
@@ -295,7 +314,7 @@ function SearchHits({
     // Wait for the text layer to pick up the new zoom.
     const t = setTimeout(compute, 200);
     return () => clearTimeout(t);
-  }, [hits, active, textLayer, page.id, zoom, pageRef]);
+  }, [hits, active, textLayer, layerKey, page.id, zoom, pageRef]);
 
   useEffect(() => {
     if (scrollReq?.y === -1 && activeRef.current) activeRef.current.scrollIntoView({ block: 'center', inline: 'nearest' });

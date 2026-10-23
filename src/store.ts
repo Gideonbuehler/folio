@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import type { Dialog, DocMeta, Obj, PageItem, Rotation, SourceDoc, Tool, ToolStyle } from './types';
-import { getText, loadSource, measureGuessed, PasswordCancelled, textItems, type PageGeometry } from './lib/pdfjs';
+import type { TextContent } from 'pdfjs-dist/types/src/display/api';
+import { loadSource, measureGuessed, PasswordCancelled, textItems, type PageGeometry } from './lib/pdfjs';
+import { pageText } from './lib/pagetext';
 import { readFileBytes, uid } from './lib/util';
 import { forgetLiveSources } from './lib/live';
 import type { FileRef, Picked } from './lib/files';
@@ -670,60 +672,73 @@ export function setMeta(meta: DocMeta) {
 /* ------------------------------------------------------------------ */
 
 let searchRun = 0;
+/** For each page, which text (see pageTextKey) the current hits were found in. */
+const searchedText = new Map<string, string>();
+
+/** Matches of `needle` in a page's text; `parts` index the text layer's items. */
+function pageHits(page: PageItem, tc: TextContent, needle: string, matchCase: boolean, limit: number): SearchHit[] {
+  const hits: SearchHit[] = [];
+  const items = textItems(tc);
+  // Concatenate items, remembering where each character came from.
+  let text = '';
+  const owner: number[] = [];
+  const offset: number[] = [];
+  items.forEach((it, i) => {
+    for (let k = 0; k < it.str.length; k++) {
+      owner.push(i);
+      offset.push(k);
+    }
+    text += it.str;
+    if (it.hasEOL) {
+      text += ' ';
+      owner.push(-1);
+      offset.push(0);
+    }
+  });
+  const hay = matchCase ? text : text.toLowerCase();
+  let from = 0;
+  while (hits.length < limit) {
+    const at = hay.indexOf(needle, from);
+    if (at < 0) break;
+    from = at + needle.length;
+    const parts: SearchPart[] = [];
+    for (let c = at; c < at + needle.length; c++) {
+      const item = owner[c];
+      if (item < 0) continue;
+      const last = parts[parts.length - 1];
+      if (last && last.item === item && last.end === offset[c]) last.end++;
+      else parts.push({ item, start: offset[c], end: offset[c] + 1 });
+    }
+    hits.push({
+      page: page.id,
+      parts,
+      before: text.slice(Math.max(0, at - 40), at).replace(/\s+/g, ' '),
+      match: text.slice(at, at + needle.length),
+      after: text.slice(at + needle.length, at + needle.length + 60).replace(/\s+/g, ' '),
+    });
+  }
+  return hits;
+}
+
+const objectsOn = (objects: Obj[], pageId: string) => objects.filter((o) => o.page === pageId);
 
 export async function runSearch(query: string, matchCase = get().search.matchCase) {
   const run = ++searchRun;
+  searchedText.clear();
   const q = query.trim();
   set({ search: { query, matchCase, hits: [], active: -1, running: !!q } });
   if (!q) return;
   const needle = matchCase ? q : q.toLowerCase();
   const hits: SearchHit[] = [];
-  const { pages, docs } = get();
+  const { pages, docs, objects } = get();
   for (const page of pages) {
     const doc = docs[page.src];
     if (!doc) continue;
-    const tc = await getText(doc, page.index);
+    // The text as the page shows it now, Edit-mode changes included (same as its text layer).
+    const { key, content } = await pageText(doc, page, objectsOn(objects, page.id));
     if (run !== searchRun) return;
-    const items = textItems(tc);
-    // Concatenate items, remembering where each character came from.
-    let text = '';
-    const owner: number[] = [];
-    const offset: number[] = [];
-    items.forEach((it, i) => {
-      for (let k = 0; k < it.str.length; k++) {
-        owner.push(i);
-        offset.push(k);
-      }
-      text += it.str;
-      if (it.hasEOL) {
-        text += ' ';
-        owner.push(-1);
-        offset.push(0);
-      }
-    });
-    const hay = matchCase ? text : text.toLowerCase();
-    let from = 0;
-    for (;;) {
-      const at = hay.indexOf(needle, from);
-      if (at < 0) break;
-      from = at + needle.length;
-      const parts: SearchPart[] = [];
-      for (let c = at; c < at + needle.length; c++) {
-        const item = owner[c];
-        if (item < 0) continue;
-        const last = parts[parts.length - 1];
-        if (last && last.item === item && last.end === offset[c]) last.end++;
-        else parts.push({ item, start: offset[c], end: offset[c] + 1 });
-      }
-      hits.push({
-        page: page.id,
-        parts,
-        before: text.slice(Math.max(0, at - 40), at).replace(/\s+/g, ' '),
-        match: text.slice(at, at + needle.length),
-        after: text.slice(at + needle.length, at + needle.length + 60).replace(/\s+/g, ' '),
-      });
-      if (hits.length >= 5000) break;
-    }
+    searchedText.set(page.id, key);
+    hits.push(...pageHits(page, content, needle, matchCase, 5000));
     if (hits.length && get().search.hits.length === 0) {
       set((s) => ({ search: { ...s.search, hits: [...hits], active: 0 } }));
       gotoHit(0);
@@ -731,6 +746,40 @@ export async function runSearch(query: string, matchCase = get().search.matchCas
   }
   if (run !== searchRun) return;
   set((s) => ({ search: { ...s.search, hits, running: false, active: hits.length ? Math.max(0, s.search.active) : -1 } }));
+}
+
+/** True when a finished search looked at different text than the page's text layer now shows. */
+export function searchIsStale(pageId: string, key: string) {
+  const { query, running } = get().search;
+  return !!query.trim() && !running && searchedText.has(pageId) && searchedText.get(pageId) !== key;
+}
+
+/** Searches one page again after its text changed, keeping the other pages' hits. */
+export async function refreshSearchPage(pageId: string) {
+  const s = get();
+  const q = s.search.query.trim();
+  const page = s.pages.find((p) => p.id === pageId);
+  const doc = page && s.docs[page.src];
+  if (!q || s.search.running || !page || !doc) return;
+  const run = searchRun;
+  const { key, content } = await pageText(doc, page, objectsOn(s.objects, pageId));
+  if (run !== searchRun) return;
+  const { matchCase } = get().search;
+  const fresh = pageHits(page, content, matchCase ? q : q.toLowerCase(), matchCase, 5000);
+  searchedText.set(pageId, key);
+  set((st) => {
+    const order = new Map(st.pages.map((p, i) => [p.id, i]));
+    const at = order.get(pageId) ?? -1;
+    const pos = (h: SearchHit) => order.get(h.page) ?? -1;
+    const before = st.search.hits.filter((h) => pos(h) < at);
+    const after = st.search.hits.filter((h) => pos(h) > at);
+    const old = st.search.hits.length - before.length - after.length;
+    const hits = [...before, ...fresh, ...after];
+    let active = st.search.active;
+    if (active >= before.length + old) active += fresh.length - old;
+    else if (active >= before.length) active = before.length + Math.min(active - before.length, Math.max(0, fresh.length - 1));
+    return { search: { ...st.search, hits, active: hits.length ? Math.min(Math.max(0, active), hits.length - 1) : -1 } };
+  });
 }
 
 export function gotoHit(i: number) {
@@ -746,6 +795,7 @@ export function gotoHit(i: number) {
 
 export function clearSearch() {
   searchRun++;
+  searchedText.clear();
   set({ search: { query: '', matchCase: get().search.matchCase, hits: [], active: -1, running: false } });
 }
 
