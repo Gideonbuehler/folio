@@ -6,6 +6,7 @@ import {
   FilePlus2,
   Files,
   FolderOpen,
+  GitCompareArrows,
   Hash,
   Info,
   Keyboard,
@@ -30,6 +31,7 @@ import {
 } from 'lucide-react';
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
 import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, printDocument, saveDocument } from '../lib/commands';
+import { compareWith } from '../lib/compare';
 import { MOD } from '../lib/util';
 import { canSaveInPlace } from '../lib/files';
 import { IconButton, MenuButton, Popover, usePopover, type MenuItem } from './ui';
@@ -75,6 +77,9 @@ export function Header() {
         icon: <FileOutput size={I} />,
         onClick: () => extractPages(s.pageSelection.length ? s.pageSelection : [s.pages[s.currentPage].id]),
       },
+      { separator: true },
+      { heading: 'Review' },
+      { label: 'Compare with…', icon: <GitCompareArrows size={I} />, onClick: () => void compareWith() },
       { separator: true },
       { heading: 'Stamp & sign' },
       { label: 'Fill & sign…', icon: <Signature size={I} />, onClick: () => set({ dialog: { kind: 'signature' } }) },

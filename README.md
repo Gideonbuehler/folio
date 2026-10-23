@@ -66,6 +66,14 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   real AcroForm fields with appearances, fillable in any reader; "Make fields
   fillable now" does the same in place so you can fill them in Folio straight
   away (Undo turns them back into editable designs).
+- Compare (Tools > Compare with…): pick another version of the document to
+  see the two side by side (scrolling together) or overlaid (what only the old
+  version has in red, what only the new one has in blue). Pages are paired by
+  their text, so inserted or removed pages are found; word-level changes are
+  highlighted in both, a pixel comparison of the rendered pages shows other
+  differences (images, graphics) as a layer you can turn off, and the list of
+  changes steps through them (Up/Down, Esc to close). Unsaved edits are
+  compared as they would be saved.
 - Organize: reorder by dragging thumbnails; rotate, duplicate, insert, extract
   and delete pages; combine several PDFs.
 - Redact: only what lies under a mark is removed, as in Acrobat. Glyphs
@@ -104,6 +112,8 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   behind Edit mode saves
 - `src/lib/export.ts`: builds the output PDF
 - `src/lib/reduce.ts`: Reduce file size (runs at the end of `buildPdf`)
+- `src/lib/compare.ts`: page pairing, word diff and pixel diff behind
+  `src/components/CompareView.tsx`
 - `src/lib/formfields.ts`: writes designed form fields as AcroForm fields;
   `src/lib/forms.ts` names them and makes them fillable in place
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
