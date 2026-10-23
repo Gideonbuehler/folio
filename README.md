@@ -52,6 +52,15 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   `src/lib/live.ts`), so whatever is underneath, such as a gradient or a photo,
   shows through. Saving applies the same content-stream rewrite, so the
   original isn't just covered over.
+- Fonts: rewritten text keeps the original's look and line breaks. Where the
+  PDF embeds a complete font (or a subset that has every character you type),
+  that font is reused. Otherwise the text is set in a bundled font with the
+  same character widths: Carlito for Calibri, Caladea for Cambria, Liberation
+  Sans, Serif and Mono for Arial/Helvetica, Times and Courier. Characters a font
+  lacks fall back, per character, to Noto Sans, Noto Sans Symbols 2 and Droid
+  Sans Fallback (Chinese, Japanese, Korean), so any text those cover saves as
+  real, searchable text. The fonts ship with the app (about 5.6 MB compressed;
+  see `public/fonts/README.md`), and saved files embed only the glyphs used.
 - Annotate: highlight, underline, strikethrough (select text, or use the
   pop-up that appears), sticky notes, comments on anything. These are saved as
   real PDF annotations.
@@ -74,8 +83,13 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 
 ## Known limits
 
-- Replaced text is set in Helvetica, Times or Courier (closest match to the
-  original). Its width is matched with horizontal scaling.
+- Fonts without a bundled match (Segoe UI, Georgia, Garamond, ...) are set in
+  the closest bundled family, squeezed or stretched to the original width.
+  Justified paragraphs keep their line breaks but are set ragged right.
+- Bold and italic exist for the Latin fonts only; Chinese, Japanese and Korean
+  text and symbols stay regular. Arabic, Indic and Thai scripts, and emoji, are
+  not covered by the bundled fonts (saving warns about them). Hebrew is, with
+  right-to-left words inside left-to-right lines.
 - Text or images inside form XObjects, or in unusual encodings, can't be
   removed from the content stream. Only those edits fall back to covering the
   original with a patch of the page's background color.
@@ -89,6 +103,9 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 - `src/lib/content.ts`: content-stream tokenizer, interpreter and rewriter
   behind Edit mode saves
 - `src/lib/export.ts`: builds the output PDF
+- `src/lib/fontdb.ts`, `src/lib/fonts.ts`, `src/lib/docfonts.ts`: the fonts
+  text is set in, measuring and line breaking, and reuse of fonts embedded in
+  the PDF
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
 - `scripts/make-samples.mjs`: generates the test PDFs in `public/samples/`.
   Open one with `?file=/samples/sample.pdf`.

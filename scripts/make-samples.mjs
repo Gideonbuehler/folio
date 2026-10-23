@@ -1,6 +1,6 @@
 // Builds sample PDFs for manual testing: text, images, a fillable form,
 // bookmarks, an internal link, a rotated page and a landscape page.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
@@ -216,4 +216,66 @@ for (const label of ['Appendix A', 'Appendix B']) {
   p.drawText(label, { x: 72, y: 700, size: 26, font: ef, color: rgb(0.1, 0.45, 0.3) });
 }
 writeFileSync(join(out, 'appendix.pdf'), await extra.save());
+// Calibri documents like Word writes them, for Edit mode font matching. Built
+// from the system's Calibri when there is one (Windows); never committed.
+const calibriDir = process.env.WINDIR ? join(process.env.WINDIR, 'Fonts') : '';
+if (calibriDir && existsSync(join(calibriDir, 'calibri.ttf'))) {
+  const fontkit = await import('@cantoo/fontkit');
+  const plain = { liga: false, clig: false, dlig: false, hlig: false, calt: false, kern: false };
+  // Calibri's embedded bitmaps stop fontkit from subsetting it (see src/lib/sfnt.ts).
+  const outlinesOnly = (file) => {
+    const b = readFileSync(join(calibriDir, file));
+    const n = b.readUInt16BE(4);
+    const keep = [];
+    for (let i = 0; i < n; i++) {
+      const o = 12 + i * 16;
+      const tag = b.toString('latin1', o, o + 4);
+      if (!['EBDT', 'EBLC', 'EBSC'].includes(tag)) keep.push({ rec: b.subarray(o, o + 16), off: b.readUInt32BE(o + 8), len: b.readUInt32BE(o + 12) });
+    }
+    const head = Buffer.alloc(12 + keep.length * 16);
+    b.copy(head, 0, 0, 4);
+    head.writeUInt16BE(keep.length, 4);
+    const pow = 2 ** Math.floor(Math.log2(keep.length));
+    head.writeUInt16BE(pow * 16, 6);
+    head.writeUInt16BE(Math.log2(pow), 8);
+    head.writeUInt16BE(keep.length * 16 - pow * 16, 10);
+    const parts = [head];
+    let at = head.length;
+    keep.forEach((t, i) => {
+      t.rec.copy(head, 12 + i * 16);
+      head.writeUInt32BE(at, 12 + i * 16 + 8);
+      const data = Buffer.alloc((t.len + 3) & ~3);
+      b.copy(data, 0, t.off, t.off + t.len);
+      parts.push(data);
+      at += data.length;
+    });
+    return Buffer.concat(parts);
+  };
+  const paragraphs = [
+    'Folio sets rewritten text in a font with the same character widths as the original, so a paragraph opened in Edit mode keeps its line breaks. Calibri is matched with Carlito, Cambria with Caladea, and Arial, Times New Roman and Courier New with the Liberation fonts.',
+    'This second paragraph is long enough to wrap over several lines as well. Its last line is short, and the column is 468 points wide, the width of a Letter page with one-inch margins.',
+    'Short closing paragraph.',
+  ];
+  for (const [file, subset] of [
+    ['calibri.pdf', true],
+    ['calibri-full.pdf', false],
+  ]) {
+    const cdoc = await PDFDocument.create();
+    cdoc.registerFontkit(fontkit);
+    const regular = await cdoc.embedFont(outlinesOnly('calibri.ttf'), { subset, features: plain });
+    const boldFont = await cdoc.embedFont(outlinesOnly('calibrib.ttf'), { subset, features: plain });
+    const cp = cdoc.addPage([612, 792]);
+    cp.drawText('Project update', { x: 72, y: 700, size: 20, font: boldFont, color: rgb(0.13, 0.25, 0.45) });
+    let cy = 660;
+    for (const para of paragraphs) {
+      for (const line of wrap(para, regular, 11, 468)) {
+        cp.drawText(line, { x: 72, y: cy, size: 11, font: regular });
+        cy -= 13.4;
+      }
+      cy -= 8;
+    }
+    writeFileSync(join(out, file), await cdoc.save());
+  }
+}
+
 console.log('samples written to', out);

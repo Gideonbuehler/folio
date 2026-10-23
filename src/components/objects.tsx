@@ -2,7 +2,8 @@ import type { CSSProperties } from 'react';
 import { MessageSquareText } from 'lucide-react';
 import type { Obj, PageItem, TextObj } from '../types';
 import { arrowHead, cropRect, markupQuads, NOTE_SIZE, rotationMatrix } from '../lib/geometry';
-import { FONT_CSS, layoutText, LINE_HEIGHT, measureText, TEXT_PAD } from '../lib/fonts';
+import { layoutText, LINE_HEIGHT, measureText, TEXT_PAD, useFontsVersion } from '../lib/fonts';
+import { fontStack } from '../lib/fontdb';
 
 export function inkPath(s: number[]) {
   const n = s.length / 2;
@@ -151,7 +152,7 @@ export function textStyle(o: TextObj, zoom: number): CSSProperties {
     width: (box.w / hs) * zoom,
     height: box.h * zoom,
     padding: `${TEXT_PAD * zoom}px ${(TEXT_PAD * zoom) / hs}px`,
-    fontFamily: FONT_CSS[o.font],
+    fontFamily: fontStack(o),
     fontSize: o.size * zoom,
     fontWeight: o.bold ? 700 : 400,
     fontStyle: o.italic ? 'italic' : 'normal',
@@ -188,6 +189,7 @@ export function NoteView({ o, zoom, active }: { o: Obj & { type: 'note' }; zoom:
 
 /** Non-interactive rendering of a page's objects (thumbnails, organizer). */
 export function StaticObjects({ page, objects, zoom, native }: { page: PageItem; objects: Obj[]; zoom: number; native?: Set<string> }) {
+  useFontsVersion();
   if (!objects.length) return null;
   const view = page.rotation % 180 ? `0 0 ${page.h} ${page.w}` : `0 0 ${page.w} ${page.h}`;
   const tx = svgTransform(page);

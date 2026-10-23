@@ -14,7 +14,6 @@ import {
   PDFStream,
   PDFObject,
   PDFObjectCopier,
-  StandardFonts,
   LineCapStyle,
   LineJoinStyle,
   PDFOperator,
@@ -45,9 +44,10 @@ import {
   drawObject,
 } from '@cantoo/pdf-lib';
 import { AnnotationMode } from 'pdfjs-dist';
-import type { DocMeta, FillObj, FontFamily, ImageObj, Matrix, Obj, PageItem, Rect, SourceDoc, TextObj } from '../types';
+import type { DocMeta, FillObj, ImageObj, Matrix, Obj, PageItem, Rect, SourceDoc, TextObj } from '../types';
 import { applyMatrix, arrowHead, invertMatrix, markupQuads, NOTE_SIZE } from './geometry';
 import { firstBaseline, layoutText, LINE_HEIGHT, measureText, TEXT_PAD } from './fonts';
+import { covers, faceBytes, fontChain, ignorable, loadFontsFor, splitRuns, uncovered, type Face } from './fontdb';
 import { analyze, isolateImage, mul, overlap, pageContentBytes, parseContent, quadRect, rewrite, setPageContent, silenceRun, wrapInTransform } from './content';
 import { hexToRgb } from './util';
 import { fillMatchingBackground } from './sample';
@@ -89,6 +89,12 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     else byPage.set(o.page, [o]);
   }
   const marked = pages.filter((p) => byPage.get(p.id)?.some((o) => o.type === 'redact'));
+  const texts = pages.flatMap((p) => byPage.get(p.id) ?? []).filter((o): o is TextObj => o.type === 'text');
+  if (texts.length) {
+    // Text is measured and embedded with the same fonts the editor showed.
+    opts.onProgress?.('Loading fonts…');
+    await loadFontsFor(texts);
+  }
 
   /* 1. Load every source we need with pdf-lib, form values included. */
   opts.onProgress?.('Preparing pages…');
@@ -286,14 +292,22 @@ function layer(o: Obj) {
 /* Resources: fonts, images, graphics states                           */
 /* ------------------------------------------------------------------ */
 
-const STD: Record<FontFamily, [StandardFonts, StandardFonts, StandardFonts, StandardFonts]> = {
-  sans: [StandardFonts.Helvetica, StandardFonts.HelveticaBold, StandardFonts.HelveticaOblique, StandardFonts.HelveticaBoldOblique],
-  serif: [StandardFonts.TimesRoman, StandardFonts.TimesRomanBold, StandardFonts.TimesRomanItalic, StandardFonts.TimesRomanBoldItalic],
-  mono: [StandardFonts.Courier, StandardFonts.CourierBold, StandardFonts.CourierOblique, StandardFonts.CourierBoldOblique],
-};
+/** Glyphs at their plain advances, as the editor shows them (no ligatures or contextual forms). */
+const PLAIN_TEXT = { liga: false, clig: false, dlig: false, hlig: false, calt: false, kern: false };
+
+type Fontkit = Parameters<PDFDocument['registerFontkit']>[0];
+
+/** The six-letter tag PDF readers expect in front of a subset font's name. */
+function subsetTag() {
+  let tag = '';
+  for (let i = 0; i < 6; i++) tag += String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  return tag;
+}
 
 class Resources {
   private fonts = new Map<string, Promise<PDFFont>>();
+  private fontkit: Promise<void> | null = null;
+  private fontKeys = new WeakMap<PDFPage, Map<PDFFont, PDFName>>();
   private images = new Map<string, Promise<PDFImage>>();
   /** Background-matched redaction fills, by object id. */
   readonly redactPatches = new Map<string, PDFImage>();
@@ -302,14 +316,34 @@ class Resources {
     private warnings: Set<string>,
   ) {}
 
-  font(family: FontFamily, bold: boolean, italic: boolean) {
-    const name = STD[family][(bold ? 1 : 0) + (italic ? 2 : 0)];
-    let f = this.fonts.get(name);
+  /** A face embedded as a subset holding just the glyphs the file uses. */
+  font(face: Face) {
+    let f = this.fonts.get(face.id);
     if (!f) {
-      f = this.doc.embedFont(name);
-      this.fonts.set(name, f);
+      f = (async () => {
+        this.fontkit ??= import('@cantoo/fontkit').then((fk) => this.doc.registerFontkit(fk as unknown as Fontkit));
+        await this.fontkit;
+        return this.doc.embedFont(await faceBytes(face), { subset: true, features: PLAIN_TEXT, customName: `${subsetTag()}+${face.ps}` });
+      })();
+      this.fonts.set(face.id, f);
     }
     return f;
+  }
+
+  /** The page's resource name for a font, added on first use. */
+  fontKey(page: PDFPage, font: PDFFont) {
+    let keys = this.fontKeys.get(page);
+    if (!keys) this.fontKeys.set(page, (keys = new Map()));
+    let key = keys.get(font);
+    if (!key) {
+      key = page.node.newFontDictionary(font.name, font.ref);
+      keys.set(font, key);
+    }
+    return key;
+  }
+
+  warn(text: string) {
+    this.warnings.add(text);
   }
 
   image(src: string) {
@@ -322,25 +356,6 @@ class Resources {
     return img;
   }
 
-  /** Text the standard fonts can encode; anything else becomes "?". */
-  safeText(font: PDFFont, text: string) {
-    try {
-      font.encodeText(text);
-      return text;
-    } catch {
-      this.warnings.add('Some characters are not supported by the built-in PDF fonts and were replaced with "?".');
-      let out = '';
-      for (const ch of text) {
-        try {
-          font.encodeText(ch);
-          out += ch;
-        } catch {
-          out += '?';
-        }
-      }
-      return out;
-    }
-  }
 }
 
 function dataUrlBytes(src: string) {
@@ -441,8 +456,9 @@ async function objectOps(page: PDFPage, o: Obj, res: Resources): Promise<PDFOper
     }
     case 'text': {
       const ops: PDFOperator[] = [];
-      const font = await res.font(o.font, o.bold, o.italic);
-      const key = page.node.newFontDictionary(font.name, font.ref);
+      const chain = fontChain(o);
+      const missing = uncovered(chain, o.text);
+      if (missing.length) res.warn(`Some characters (${missing.slice(0, 6).join(' ')}) aren't in Folio's fonts and may show as boxes in the saved file.`);
       const box = measureText(o);
       if (o.rotate) {
         const cx = o.x + box.w / 2;
@@ -453,15 +469,22 @@ async function objectOps(page: PDFPage, o: Obj, res: Resources): Promise<PDFOper
         ops.push(concatTransformationMatrix(1, 0, 0, 1, cx, cy), concatTransformationMatrix(cos, sin, -sin, cos, 0, 0), concatTransformationMatrix(1, 0, 0, 1, -cx, -cy));
       }
       const lh = o.lineHeight ?? LINE_HEIGHT;
-      ops.push(setFillingRgbColor(...rgb(o.color)), beginText(), setFontAndSize(key, o.size));
+      ops.push(setFillingRgbColor(...rgb(o.color)), beginText());
       if (o.hscale && o.hscale !== 1) ops.push(setCharacterSqueeze(o.hscale * 100));
-      const base = firstBaseline(o.font, o.size, lh);
-      layoutText(o).forEach((line, i) => {
+      const base = firstBaseline(o, lh);
+      let current: PDFFont | null = null;
+      for (const [i, line] of layoutText(o).entries()) {
         const text = line.text.replace(/\s+$/, '');
-        if (!text) return;
+        if (!text) continue;
         ops.push(setTextMatrix(1, 0, 0, -1, o.x + TEXT_PAD, o.y + base + i * o.size * lh));
-        ops.push(showText(font.encodeText(res.safeText(font, text))));
-      });
+        // One text-showing operator per font run; each continues where the last ended.
+        for (const run of visualRuns(chain, text)) {
+          const font = await res.font(run.face);
+          if (font !== current) ops.push(setFontAndSize(res.fontKey(page, font), o.size));
+          current = font;
+          ops.push(showText(font.encodeText(run.text)));
+        }
+      }
       ops.push(endText());
       return ops;
     }
@@ -477,6 +500,50 @@ async function objectOps(page: PDFPage, o: Obj, res: Resources): Promise<PDFOper
     case 'note':
       return [];
   }
+}
+
+const RTL = /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/u;
+const LETTER = /\p{L}/u;
+const DIGIT = /\p{Nd}/u;
+const reverse = (s: string) => [...s].reverse().join('');
+
+/**
+ * A line's font runs in the order they appear, left to right. Right-to-left
+ * words are drawn reversed (fontkit reverses runs in an RTL script; neutral
+ * runs between them are reversed here); numbers inside them keep their order.
+ * The line itself is taken as left-to-right, like the editor shows it.
+ */
+function visualRuns(chain: Face[], text: string) {
+  const runs = (s: string) =>
+    splitRuns(chain, s).map((r) => {
+      // Joiners and variation selectors a font lacks would draw as boxes.
+      let t = '';
+      for (const ch of r.text) if (!ignorable(ch.codePointAt(0)!) || covers(r.face, ch.codePointAt(0)!)) t += ch;
+      return { ...r, text: t };
+    });
+  if (!RTL.test(text)) return runs(text);
+  const chars = [...text];
+  const out: ReturnType<typeof runs> = [];
+  for (let i = 0; i < chars.length; ) {
+    let j = i;
+    if (!RTL.test(chars[i])) {
+      while (j < chars.length && !RTL.test(chars[j])) j++;
+      out.push(...runs(chars.slice(i, j).join('')));
+    } else {
+      // From this RTL letter to the last RTL letter or digit before the next
+      // left-to-right letter (numbers after RTL text belong to it).
+      let end = i;
+      for (j = i; j < chars.length && !(LETTER.test(chars[j]) && !RTL.test(chars[j])); j++) if (RTL.test(chars[j]) || DIGIT.test(chars[j])) end = j;
+      j = end + 1;
+      const parts = chars.slice(i, j).join('').match(/\p{Nd}+(?:[.,:]\p{Nd}+)*|\P{Nd}+/gu) ?? [];
+      for (const part of parts.reverse()) {
+        if (/^\p{Nd}/u.test(part)) out.push(...runs(part));
+        else for (const r of runs(part).reverse()) out.push(RTL.test(r.text) ? r : { ...r, text: reverse(r.text) });
+      }
+    }
+    i = j;
+  }
+  return out.filter((r) => r.text);
 }
 
 const KAPPA = 0.5522847498;

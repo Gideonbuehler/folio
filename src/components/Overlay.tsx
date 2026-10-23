@@ -17,7 +17,9 @@ import {
   useStore,
 } from '../store';
 import { clientToPage, moveObj, NOTE_SIZE, objBounds, pointInRect, rectFromPoints, rectsIntersect, resizeObj, unionRects } from '../lib/geometry';
-import { firstBaseline, LINE_HEIGHT, measureText, offsetAt, TEXT_PAD, textWidth } from '../lib/fonts';
+import { firstBaseline, LINE_HEIGHT, measureText, normalizeSymbols, offsetAt, TEXT_PAD, textWidth, useFontsVersion, wrapWidth } from '../lib/fonts';
+import { activeDocFont, loadFontsFor } from '../lib/fontdb';
+import { docFontFor, prepareDocFonts } from '../lib/docfonts';
 import { buildLines, buildParagraphs, findImages, getText, imagePixels, lineFont, type PageImage, type Paragraph } from '../lib/pdfjs';
 import { matchingPatch, sampleColors } from '../lib/sample';
 import { uid } from '../lib/util';
@@ -75,6 +77,8 @@ export function Overlay({ page, zoom, objects, pdfPage, canvasRef, shown, holes,
   const editMode = tool === 'editText';
   const editables = useEditables(page, pdfPage, editMode);
   const capture = CAPTURE.includes(tool);
+  // Text is laid out again once the fonts it needs have loaded.
+  useFontsVersion();
 
   useEffect(() => {
     if (!editMode) setHover(null);
@@ -265,32 +269,35 @@ export function Overlay({ page, zoom, objects, pdfPage, canvasRef, shown, holes,
 
   /** Turns a paragraph of page text into an editable text box over the original. */
   const paragraphObject = (para: Paragraph): TextObj => {
-    const first = para.lines[0];
-    const f = pdfPage ? lineFont(pdfPage, first) : { font: 'sans' as const, bold: false, italic: false };
+    const { metric, ...fs } = paragraphStyle(pdfPage, page.src, para);
     const size = Math.round(para.size * 10) / 10;
     const pad = Math.max(0.6, size * 0.08);
     const cover = { x: para.x - pad, y: para.y - pad, w: para.w + pad * 2, h: para.h + pad * 2 };
     const colors = sampleColors(canvasRef.current, page, zoom, cover);
     const multi = para.lines.length > 1;
     const lineHeight = multi ? Math.round(Math.min(2.2, Math.max(0.9, para.lineHeight)) * 1000) / 1000 : LINE_HEIGHT;
-    // Squeeze or stretch the substitute font so lines keep their original length.
-    const style = { font: f.font, size, bold: f.bold, italic: f.italic };
-    const natural = para.lines.reduce((t, l) => t + textWidth(style, l.text), 0);
-    const actual = para.lines.reduce((t, l) => t + l.w, 0);
-    let hscale = natural > 0 ? actual / natural : 1;
-    hscale = Math.abs(hscale - 1) < 0.03 ? 1 : Math.round(Math.min(1.25, Math.max(0.75, hscale)) * 1000) / 1000;
+    const style = { ...fs, size };
+    const lines = para.lines.map((l) => normalizeSymbols(l.text.trim()));
+    // Squeeze or stretch a substitute font so lines keep their original length.
+    // Metric-compatible fonts (and the document's own) have the original widths.
+    let hscale = 1;
+    if (!metric) {
+      const natural = lines.reduce((t, l) => t + textWidth(style, l), 0);
+      const actual = para.lines.reduce((t, l) => t + l.w, 0);
+      hscale = natural > 0 ? actual / natural : 1;
+      hscale = Math.abs(hscale - 1) < 0.03 ? 1 : Math.round(Math.min(1.25, Math.max(0.75, hscale)) * 1000) / 1000;
+    }
+    const scaled = { ...style, hscale: hscale === 1 ? undefined : hscale };
     return {
       ...base(),
       type: 'text',
       x: para.x - TEXT_PAD,
-      y: para.baseline - firstBaseline(f.font, size, lineHeight),
-      text: multi ? para.text : first.text,
-      ...style,
+      y: para.baseline - firstBaseline(style, lineHeight),
+      ...scaled,
       color: colors.fg,
       lineHeight,
-      hscale: hscale === 1 ? undefined : hscale,
-      // Multi-line paragraphs reflow inside their original column.
-      width: multi ? para.w + size * 0.6 : undefined,
+      // Multi-line paragraphs reflow inside their original column, breaking where the original did.
+      width: multi ? wrapWidth(scaled, lines, para.w + size * 0.6) : undefined,
       cover: { ...cover, color: colors.bg },
     };
   };
@@ -632,6 +639,18 @@ export function Overlay({ page, zoom, objects, pdfPage, canvasRef, shown, holes,
   );
 }
 
+/** Font, style and text a paragraph of page text is rewritten with. */
+function paragraphStyle(pdfPage: PDFPageProxy | null, docId: string, para: Paragraph) {
+  const first = para.lines[0];
+  const f = pdfPage ? lineFont(pdfPage, first) : { font: 'sans' as const, metric: false, bold: false, italic: false };
+  const text = normalizeSymbols(para.lines.length > 1 ? para.text : first.text);
+  const style = { font: f.font, bold: f.bold, italic: f.italic, embedded: docFontFor(docId, first.fontName)?.id, text };
+  // The PDF's own font is kept only if it can draw the text.
+  const doc = activeDocFont(style);
+  if (!doc) style.embedded = undefined;
+  return { ...style, metric: f.metric || !!doc };
+}
+
 function overlapRatio(a: Rect, b: Rect) {
   const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
   const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
@@ -656,8 +675,18 @@ function useEditables(page: PageItem, pdfPage: PDFPageProxy | null, enabled: boo
     const doc = docs[page.src];
     if (!doc) return;
     let alive = true;
-    Promise.all([getText(doc, page.index), findImages(pdfPage, page).catch(() => [])]).then(([tc, images]) => {
-      if (alive) setState({ paragraphs: buildParagraphs(buildLines(tc, page)), images, ready: true });
+    Promise.all([getText(doc, page.index), findImages(pdfPage, page).catch(() => [])]).then(async ([tc, images]) => {
+      const paragraphs = buildParagraphs(buildLines(tc, page));
+      const styles = () => paragraphs.map((p) => paragraphStyle(pdfPage, doc.id, p));
+      // Load the fonts first, so a click measures text with the font it will be set in.
+      await loadFontsFor(styles());
+      if (!alive) return;
+      setState({ paragraphs, images, ready: true });
+      // Fonts the PDF embeds that could be reused need the whole file parsed; until
+      // that's done, paragraphs open in the bundled match.
+      const firstLines = new Map(paragraphs.map((p) => [p.lines[0].fontName, p.lines[0]]));
+      await prepareDocFonts(doc, pdfPage, page.index, [...firstLines.values()]);
+      await loadFontsFor(styles());
     });
     return () => {
       alive = false;
@@ -737,7 +766,13 @@ function TextEditor({ o, zoom }: { o: TextObj; zoom: number }) {
     }
     return () => finishEditing(id);
   }, [id]);
-  const st = useMemo(() => ({ ...textStyle(o, zoom), whiteSpace: o.width ? ('pre-wrap' as const) : ('pre' as const) }), [o, zoom]);
+  const fonts = useFontsVersion();
+  const st = useMemo(
+    () => ({ ...textStyle(o, zoom), whiteSpace: o.width ? ('pre-wrap' as const) : ('pre' as const) }),
+    // Fonts finishing loading change the measured box.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [o, zoom, fonts],
+  );
   return (
     <textarea
       ref={ref}

@@ -3,7 +3,8 @@ import { Lock } from 'lucide-react';
 import type { DocMeta, FontFamily, Obj, PageItem, TextObj } from '../types';
 import { actions, commit, setMeta, setUserName, useStore } from '../store';
 import { exportImages, saveDocument } from '../lib/commands';
-import { FONT_LABEL, measureText } from '../lib/fonts';
+import { FONT_LABEL, measureText, useFontsVersion } from '../lib/fonts';
+import { fontStack, loadFontsFor } from '../lib/fontdb';
 import { baseName, formatBytes, MOD, uid } from '../lib/util';
 import { Button, ColorButton, Field, Modal, Segmented, Slider, Toggle } from './ui';
 import { SignatureDialog } from './SignatureDialog';
@@ -116,10 +117,15 @@ function WatermarkDialog() {
   const [bold, setBold] = useState(true);
   const [scope, setScope] = useState<Scope>('all');
   const [range, setRange] = useState('');
+  useFontsVersion();
+  useEffect(() => {
+    void loadFontsFor([{ text, font, bold, italic: false }]);
+  }, [text, font, bold]);
 
-  const apply = () => {
+  const apply = async () => {
     const pages = scopePages(scope, range);
     if (!text.trim() || !pages.length) return;
+    await loadFontsFor([{ text, font, bold, italic: false }]);
     const objs: Obj[] = pages.map((p) => {
       const box = measureText({ text, font, size, bold, italic: false });
       return textObj(p, { text, font, size, bold, color, opacity, rotate: Number(angle), x: (p.w - box.w) / 2, y: (p.h - box.h) / 2 });
@@ -146,7 +152,7 @@ function WatermarkDialog() {
       <div className="wm-preview">
         <span
           style={{
-            fontFamily: font === 'sans' ? 'Arial' : font === 'serif' ? 'Times New Roman' : 'Courier New',
+            fontFamily: fontStack({ font, bold, italic: false }),
             fontWeight: bold ? 700 : 400,
             color,
             opacity,
@@ -221,12 +227,13 @@ function PageNumbersDialog() {
       .replace(/\{date\}/g, new Date().toLocaleDateString())
       .replace(/\{file\}/g, baseName(fileName));
 
-  const apply = () => {
+  const apply = async () => {
     let pages = scopePages(scope, range);
     if (skipFirst) pages = pages.filter((p) => p !== actions.get().pages[0]);
     if (!pages.length || !format.trim()) return;
     const all = actions.get().pages;
     const total = all.length + start - 1;
+    await loadFontsFor(pages.map((p) => ({ text: render(all.indexOf(p) + start, total), font: 'sans' as const, bold: false, italic: false })));
     const objs = pages.map((p) => {
       const n = all.indexOf(p) + start;
       const text = render(n, total);

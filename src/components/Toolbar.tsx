@@ -26,7 +26,8 @@ import {
 } from 'lucide-react';
 import type { FontFamily, Obj, Tool, ToolStyle } from '../types';
 import { actions, deleteObjects, duplicateObjects, setStyle, setTool, updateObjects, useStore } from '../store';
-import { FONT_LABEL } from '../lib/fonts';
+import { FONT_LABEL, useFontsVersion } from '../lib/fonts';
+import { activeDocFont } from '../lib/fontdb';
 import { pickAndInsertImage } from '../lib/commands';
 import { ColorButton, HIGHLIGHT_PALETTE, IconButton, Popover, Segmented, SliderButton, usePopover } from './ui';
 import { backgroundColorAt } from '../lib/sample';
@@ -202,6 +203,7 @@ function ContextOptions() {
   const selection = useStore((s) => s.selection);
   const objects = useStore((s) => s.objects);
   const style = useStore((s) => s.style);
+  useFontsVersion();
   const selected = objects.filter((o) => selection.includes(o.id));
   const subject = selected[0];
   const kind: Kind = subject ? kindOf(subject.type) : kindOf(tool);
@@ -264,14 +266,21 @@ function ContextOptions() {
   } else if (kind === 'text') {
     const o = subject?.type === 'text' ? subject : undefined;
     const v = o ?? { font: style.font, size: style.size, bold: style.bold, italic: style.italic, color: style.textColor };
+    // Text rewritten in Edit mode may be set in the PDF's own font.
+    const docFont = o ? activeDocFont(o) : null;
     controls = (
       <>
         <select
           className="select"
           aria-label="Font"
-          value={v.font}
-          onChange={(e) => apply({ font: e.target.value as FontFamily } as Partial<Obj>, { font: e.target.value as FontFamily })}
+          value={docFont ? docFont.id : v.font}
+          onChange={(e) => {
+            if (e.target.value === docFont?.id) return;
+            const font = e.target.value as FontFamily;
+            apply({ font, embedded: undefined } as Partial<Obj>, { font });
+          }}
         >
+          {docFont && <option value={docFont.id}>{docFont.name} (from document)</option>}
           {(Object.keys(FONT_LABEL) as FontFamily[]).map((f) => (
             <option key={f} value={f}>
               {FONT_LABEL[f]}

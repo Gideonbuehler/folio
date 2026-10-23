@@ -13,7 +13,7 @@ import { pdfjs } from './pdfjs';
 
 const libs = new Map<string, Promise<PDFDocument>>();
 
-function libFor(doc: SourceDoc) {
+export function libFor(doc: SourceDoc) {
   let p = libs.get(doc.id);
   if (!p) {
     p = loadLib(doc.bytes, doc.password);
