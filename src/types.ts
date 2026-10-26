@@ -209,4 +209,5 @@ export type Dialog =
   | { kind: 'save'; saveAs: boolean }
   | { kind: 'password'; name: string; retry: boolean; resolve: (pw: string | null) => void }
   | { kind: 'exportImages' }
-  | { kind: 'shortcuts' };
+  | { kind: 'shortcuts' }
+  | { kind: 'unsaved'; name: string; resolve: (choice: 'save' | 'discard' | 'cancel') => void };

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Copy, EyeOff, Highlighter, Strikethrough, Underline } from 'lucide-react';
 import type { Obj, PageItem } from '../types';
-import { actions, scrollToPage, toast, useStore, ZOOM_MAX, ZOOM_MIN } from '../store';
+import { actions, scrollToPage, setViewportProbe, toast, useStore, ZOOM_MAX, ZOOM_MIN } from '../store';
 import { clientToPage, displaySize } from '../lib/geometry';
 import { markupSelection, pageSelection, type MarkupKind } from '../lib/selection';
 import { insertImageFile } from '../lib/images';
@@ -116,10 +116,26 @@ export function Viewer() {
     const el = ref.current;
     const top = layout.tops[scrollReq.page];
     if (top === undefined) return;
-    const y = scrollReq.y && scrollReq.y > 0 ? scrollReq.y * zoom : 0;
-    el.scrollTo({ top: top - 12 + y, behavior: 'auto' });
+    const restore = scrollReq.left !== undefined;
+    const y = scrollReq.y && (scrollReq.y > 0 || restore) ? scrollReq.y * zoom : 0;
+    el.scrollTo({ top: top - 12 + y, left: scrollReq.left, behavior: 'auto' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollReq]);
+
+  /* Tells the store where the view is, so switching tabs comes back to the same spot. */
+  useEffect(
+    () =>
+      setViewportProbe(() => {
+        const el = ref.current;
+        if (!el) return null;
+        const { layout: l, zoom: z } = prev.current;
+        const at = el.scrollTop + 12;
+        let page = 0;
+        for (let i = 0; i < l.tops.length && l.tops[i] <= at; i++) page = i;
+        return { page, y: (at - (l.tops[page] ?? 0)) / z, left: el.scrollLeft };
+      }),
+    [],
+  );
 
   const frame = useRef(0);
   const onScroll = () => {

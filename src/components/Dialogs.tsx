@@ -7,6 +7,7 @@ import { FONT_LABEL, measureText } from '../lib/fonts';
 import { baseName, formatBytes, MOD, uid } from '../lib/util';
 import { Button, ColorButton, Field, Modal, Segmented, Slider, Toggle } from './ui';
 import { SignatureDialog } from './SignatureDialog';
+import { UnsavedDialog } from './SessionDialogs';
 
 const close = () => actions.set({ dialog: null });
 
@@ -30,6 +31,8 @@ export function DialogHost() {
       return <ExportImagesDialog />;
     case 'shortcuts':
       return <ShortcutsDialog />;
+    case 'unsaved':
+      return <UnsavedDialog name={dialog.name} resolve={dialog.resolve} />;
   }
 }
 
@@ -555,6 +558,8 @@ const SHORTCUTS: [string, string][] = [
   ['Insert image / Fill & sign', 'I / S'],
   ['Whiteout / Redact', 'W / X'],
   ['Open', `${MOD}+O`],
+  ['Next / previous tab', `${MOD}+Tab / ${MOD}+Shift+Tab`],
+  ['Close tab', `${MOD}+W`],
   ['Save / Save as', `${MOD}+S / ${MOD}+Shift+S`],
   ['Print', `${MOD}+P`],
   ['Undo / Redo', `${MOD}+Z / ${MOD}+Shift+Z`],

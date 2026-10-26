@@ -4,7 +4,7 @@ import type { Dialog, DocMeta, Obj, PageItem, Rotation, SourceDoc, Tool, ToolSty
 import { getText, loadSource, PasswordCancelled, textItems } from './lib/pdfjs';
 import { readFileBytes, uid } from './lib/util';
 import { forgetLiveSources } from './lib/live';
-import type { FileRef, Picked } from './lib/files';
+import { isPathRef, type FileRef, type Picked } from './lib/files';
 
 interface Snapshot {
   pages: PageItem[];
@@ -35,7 +35,16 @@ export interface Toast {
 export type SidebarTab = 'pages' | 'bookmarks' | 'comments' | 'search';
 export type Theme = 'light' | 'dark' | 'system';
 
+/** An open document. The active tab's state is the store's own fields (see Tabs below). */
+export interface Tab {
+  id: string;
+  /** The tab's state while another tab is active; null for the active tab. */
+  saved: DocState | null;
+}
+
 interface State extends Snapshot {
+  tabs: Tab[];
+  activeTab: string | null;
   docs: Record<string, SourceDoc>;
   fileName: string;
   fileHandle: FileRef | null;
@@ -48,7 +57,8 @@ interface State extends Snapshot {
   zoom: number;
   fit: 'width' | 'page' | null;
   currentPage: number;
-  scrollReq: { page: number; y?: number; ts: number } | null;
+  /** `left` restores a tab's horizontal scroll; `y` (page points) may then be negative. */
+  scrollReq: { page: number; y?: number; left?: number; ts: number } | null;
   tool: Tool;
   selection: string[];
   editing: string | null;
@@ -117,7 +127,17 @@ export function savePref(key: string, value: unknown) {
 
 const EMPTY_META: DocMeta = { title: '', author: '', subject: '', keywords: '' };
 
+/** How documents open: the zoom mode (or zoom) last used. */
+const VIEW_PREF = loadPref<{ fit: State['fit']; zoom: number }>('view', { fit: 'width', zoom: 1 });
+
+function loadSidebar(): SidebarTab | null {
+  const v = loadString('sidebar', 'pages');
+  return v === 'none' ? null : (v as SidebarTab);
+}
+
 export const useStore = create<State>()(() => ({
+  tabs: [],
+  activeTab: null,
   docs: {},
   pages: [],
   objects: [],
@@ -130,8 +150,8 @@ export const useStore = create<State>()(() => ({
   future: [],
   gestureBase: null,
 
-  zoom: 1,
-  fit: 'width',
+  zoom: VIEW_PREF.zoom,
+  fit: VIEW_PREF.fit,
   currentPage: 0,
   scrollReq: null,
   tool: 'select',
@@ -140,7 +160,7 @@ export const useStore = create<State>()(() => ({
   openNote: null,
   liveHoles: [],
   pageSelection: [],
-  sidebar: 'pages',
+  sidebar: loadSidebar(),
   organize: false,
   dialog: null,
   theme: loadTheme(),
@@ -434,28 +454,30 @@ async function loadFile(file: File) {
   return loadSource(bytes, file.name, askPassword(file.name));
 }
 
-export async function openDocuments(picked: Picked[]) {
+/** Opens PDF bytes, asking for the password if the file is encrypted. */
+export function openSource(bytes: Uint8Array, name: string) {
+  return loadSource(bytes, name, askPassword(name));
+}
+
+/** Opens the files as one document (several are combined) in a new tab. Returns the tab's id. */
+export async function openDocuments(picked: Picked[]): Promise<string | null> {
   const pdfs = picked.filter((p) => /pdf$/i.test(p.file.type) || /\.pdf$/i.test(p.file.name));
   if (!pdfs.length) {
     if (picked.length) toast('That file is not a PDF', 'error');
-    return;
+    return null;
   }
-  const prev = get();
   set({ busy: pdfs.length > 1 ? 'Combining documents…' : 'Opening…' });
   try {
     const loaded = [];
     for (const p of pdfs) loaded.push(await loadFile(p.file));
-    for (const d of Object.values(prev.docs)) void d.pdf.loadingTask.destroy();
-    forgetLiveSources();
     const docs: Record<string, SourceDoc> = {};
     for (const l of loaded) docs[l.doc.id] = l.doc;
     const first = loaded[0].doc;
     const info = (await first.pdf.getMetadata().catch(() => null))?.info as Record<string, unknown> | undefined;
     const str = (v: unknown) => (typeof v === 'string' ? v : '');
-    set({
+    const id = openTab({
       docs,
       pages: loaded.flatMap((l) => l.pages),
-      objects: [],
       meta: {
         title: str(info?.Title),
         author: str(info?.Author),
@@ -465,50 +487,24 @@ export async function openDocuments(picked: Picked[]) {
       fileName: pdfs.length > 1 ? 'Combined.pdf' : first.name,
       fileHandle: pdfs.length === 1 ? pdfs[0].handle : null,
       dirty: pdfs.length > 1,
-      past: [],
-      future: [],
-      selection: [],
-      editing: null,
-      openNote: null,
-      pageSelection: [],
-      currentPage: 0,
-      scrollReq: { page: 0, ts: Date.now() },
-      fit: 'width',
-      organize: false,
-      tool: 'select',
-      search: { query: '', matchCase: false, hits: [], active: -1, running: false },
     });
-    blankDocs.clear();
+    set({ tool: 'select' });
+    return id;
   } catch (e) {
     if (!(e instanceof PasswordCancelled)) {
       console.error(e);
       toast(`Couldn't open the file: ${(e as Error).message}`, 'error');
     }
+    return null;
   } finally {
     set({ busy: null });
   }
 }
 
+/** Closes the active tab without asking. */
 export function closeDocument() {
-  for (const d of Object.values(get().docs)) void d.pdf.loadingTask.destroy();
-  forgetLiveSources();
-  blankDocs.clear();
-  set({
-    docs: {},
-    pages: [],
-    objects: [],
-    meta: EMPTY_META,
-    fileName: '',
-    fileHandle: null,
-    dirty: false,
-    past: [],
-    future: [],
-    selection: [],
-    pageSelection: [],
-    editing: null,
-    openNote: null,
-    organize: false,
-  });
+  const id = get().activeTab;
+  if (id) closeTab(id);
 }
 
 /* ------------------------------------------------------------------ */
@@ -641,20 +637,26 @@ export function setMeta(meta: DocMeta) {
 /* ------------------------------------------------------------------ */
 
 let searchRun = 0;
+/** The latest search in each tab; an older one stops when a newer one starts. */
+const searchRuns = new Map<string | null, number>();
 
 export async function runSearch(query: string, matchCase = get().search.matchCase) {
   const run = ++searchRun;
+  // Results belong to the tab the search started in, even if another is active by the time they arrive.
+  const tab = get().activeTab;
+  searchRuns.set(tab, run);
+  const stale = () => searchRuns.get(tab) !== run || !tabState(tab);
   const q = query.trim();
-  set({ search: { query, matchCase, hits: [], active: -1, running: !!q } });
+  patchTab(tab, { search: { query, matchCase, hits: [], active: -1, running: !!q } });
   if (!q) return;
   const needle = matchCase ? q : q.toLowerCase();
   const hits: SearchHit[] = [];
-  const { pages, docs } = get();
+  const { pages, docs } = tabState(tab)!;
   for (const page of pages) {
     const doc = docs[page.src];
     if (!doc) continue;
     const tc = await getText(doc, page.index);
-    if (run !== searchRun) return;
+    if (stale()) return;
     const items = textItems(tc);
     // Concatenate items, remembering where each character came from.
     let text = '';
@@ -695,13 +697,13 @@ export async function runSearch(query: string, matchCase = get().search.matchCas
       });
       if (hits.length >= 5000) break;
     }
-    if (hits.length && get().search.hits.length === 0) {
-      set((s) => ({ search: { ...s.search, hits: [...hits], active: 0 } }));
-      gotoHit(0);
+    if (hits.length && tabState(tab)!.search.hits.length === 0) {
+      patchTab(tab, (s) => ({ search: { ...s.search, hits: [...hits], active: 0 } }));
+      if (get().activeTab === tab) gotoHit(0);
     }
   }
-  if (run !== searchRun) return;
-  set((s) => ({ search: { ...s.search, hits, running: false, active: hits.length ? Math.max(0, s.search.active) : -1 } }));
+  if (stale()) return;
+  patchTab(tab, (s) => ({ search: { ...s.search, hits, running: false, active: hits.length ? Math.max(0, s.search.active) : -1 } }));
 }
 
 export function gotoHit(i: number) {
@@ -716,8 +718,211 @@ export function gotoHit(i: number) {
 }
 
 export function clearSearch() {
-  searchRun++;
+  searchRuns.delete(get().activeTab);
   set({ search: { query: '', matchCase: get().search.matchCase, hits: [], active: -1, running: false } });
 }
+
+/* ------------------------------------------------------------------ */
+/* Tabs                                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Each open document is a tab. The active tab's state lives in the store's
+ * top-level fields, so the rest of the app reads and changes "the document"
+ * without knowing about tabs; background tabs keep theirs in `Tab.saved` and
+ * swap back in when activated. A document is its Snapshot (whatever undo
+ * covers, so new content fields come along automatically) plus the fields
+ * listed here; everything else (tool, sidebar, dialogs, style, ...) is shared
+ * by all tabs.
+ */
+const DOC_KEYS = [
+  'docs',
+  'fileName',
+  'fileHandle',
+  'dirty',
+  'past',
+  'future',
+  'gestureBase',
+  'zoom',
+  'fit',
+  'currentPage',
+  'scrollReq',
+  'selection',
+  'editing',
+  'openNote',
+  'pageSelection',
+  'organize',
+  'search',
+] as const satisfies readonly (keyof State)[];
+
+/** One document's state: its content (everything undo covers) plus how it's being viewed. */
+export type DocState = Snapshot & Pick<State, (typeof DOC_KEYS)[number]>;
+
+export type { Snapshot };
+export { snap };
+
+function freshDoc(): DocState {
+  return {
+    docs: {},
+    pages: [],
+    objects: [],
+    meta: EMPTY_META,
+    fileName: '',
+    fileHandle: null,
+    dirty: false,
+    past: [],
+    future: [],
+    gestureBase: null,
+    zoom: VIEW_PREF.zoom,
+    fit: VIEW_PREF.fit,
+    currentPage: 0,
+    scrollReq: { page: 0, ts: Date.now() },
+    selection: [],
+    editing: null,
+    openNote: null,
+    pageSelection: [],
+    organize: false,
+    search: { query: '', matchCase: false, hits: [], active: -1, running: false },
+  };
+}
+
+function liveDoc(s: State): DocState {
+  const d: Partial<Record<keyof DocState, unknown>> = snap(s);
+  for (const k of DOC_KEYS) d[k] = s[k];
+  return d as DocState;
+}
+
+/** A tab's document state, wherever it currently lives; null if there's no such tab. `null` means the active one. */
+export function tabState(id: string | null): DocState | null {
+  const s = get();
+  if (id === null || id === s.activeTab) return liveDoc(s);
+  return s.tabs.find((t) => t.id === id)?.saved ?? null;
+}
+
+/** Changes one tab's state, active or not. */
+export function patchTab(id: string | null, patch: Partial<DocState> | ((d: DocState) => Partial<DocState>)) {
+  const s = get();
+  if (id === null || id === s.activeTab) {
+    set(typeof patch === 'function' ? patch(liveDoc(s)) : patch);
+    return;
+  }
+  set({
+    tabs: s.tabs.map((t) => (t.id === id && t.saved ? { id, saved: { ...t.saved, ...(typeof patch === 'function' ? patch(t.saved) : patch) } } : t)),
+  });
+}
+
+export const anyDirty = () => get().tabs.some((t) => tabState(t.id)?.dirty);
+
+/** Where the viewer is scrolled to, reported by the mounted viewer so a tab can come back to the same spot. */
+type ViewportProbe = () => { page: number; y: number; left: number } | null;
+let viewportProbe: ViewportProbe | null = null;
+
+export function setViewportProbe(probe: ViewportProbe) {
+  viewportProbe = probe;
+  return () => {
+    if (viewportProbe === probe) viewportProbe = null;
+  };
+}
+
+/** The active tab's state as it should be kept while in the background. */
+function stash(s: State): DocState {
+  if (s.gestureBase) endGesture();
+  const d = liveDoc(get());
+  const at = s.organize ? null : viewportProbe?.();
+  return { ...d, editing: null, gestureBase: null, scrollReq: at ? { ...at, ts: 0 } : d.scrollReq };
+}
+
+/** The store fields that make `saved` the active tab. */
+function unstash(saved: DocState): Partial<State> {
+  return { ...saved, liveHoles: [], scrollReq: saved.scrollReq ? { ...saved.scrollReq, ts: Date.now() } : null };
+}
+
+/** Adds a tab after the others and makes it active. Returns its id. */
+export function openTab(doc: Partial<DocState>, id = uid()): string {
+  const s = get();
+  const tabs = s.tabs.map((t) => (t.id === s.activeTab ? { id: t.id, saved: stash(s) } : t));
+  set({ ...unstash({ ...freshDoc(), ...doc }), tabs: [...tabs, { id, saved: null }], activeTab: id });
+  return id;
+}
+
+export function switchTab(id: string) {
+  const s = get();
+  const target = s.tabs.find((t) => t.id === id);
+  if (id === s.activeTab || !target?.saved) return;
+  const current = stash(s);
+  set({
+    ...unstash(target.saved),
+    tabs: get().tabs.map((t) => (t.id === id ? { id, saved: null } : t.id === s.activeTab ? { id: t.id, saved: current } : t)),
+    activeTab: id,
+  });
+}
+
+/** Ctrl+Tab and Ctrl+Shift+Tab. */
+export function cycleTab(dir: 1 | -1) {
+  const { tabs, activeTab } = get();
+  if (tabs.length < 2) return;
+  const i = tabs.findIndex((t) => t.id === activeTab);
+  switchTab(tabs[(i + dir + tabs.length) % tabs.length].id);
+}
+
+/** Moves a tab to position `to` in the tab bar. */
+export function moveTab(id: string, to: number) {
+  const tabs = get().tabs;
+  const from = tabs.findIndex((t) => t.id === id);
+  if (from < 0 || from === to) return;
+  const next = tabs.filter((t) => t.id !== id);
+  next.splice(Math.max(0, Math.min(next.length, to)), 0, tabs[from]);
+  set({ tabs: next });
+}
+
+/** Closes a tab without asking; the next one to the right (or left) becomes active. */
+export function closeTab(id: string) {
+  const s = get();
+  const i = s.tabs.findIndex((t) => t.id === id);
+  if (i < 0) return;
+  const doc = tabState(id)!;
+  for (const d of Object.values(doc.docs)) void d.pdf.loadingTask.destroy();
+  forgetLiveSources(Object.keys(doc.docs));
+  searchRuns.delete(id);
+  const tabs = s.tabs.filter((t) => t.id !== id);
+  if (id !== s.activeTab) {
+    set({ tabs });
+    return;
+  }
+  const next = tabs[Math.min(i, tabs.length - 1)];
+  if (!next?.saved) {
+    set({ ...freshDoc(), scrollReq: null, liveHoles: [], tabs: [], activeTab: null });
+    return;
+  }
+  set({ ...unstash(next.saved), tabs: tabs.map((t) => (t.id === next.id ? { id: t.id, saved: null } : t)), activeTab: next.id });
+}
+
+/** The tab showing this file, if it's already open. */
+export async function findTab(ref: FileRef): Promise<string | null> {
+  for (const t of get().tabs) {
+    const h = tabState(t.id)?.fileHandle;
+    if (!h) continue;
+    if (isPathRef(ref) || isPathRef(h)) {
+      if (isPathRef(ref) && isPathRef(h) && ref.path.toLowerCase() === h.path.toLowerCase()) return t.id;
+    } else if (await ref.isSameEntry(h).catch(() => false)) return t.id;
+  }
+  return null;
+}
+
+/* Remember the sidebar panel and how documents are zoomed for next time. */
+let viewPrefTimer = 0;
+useStore.subscribe((s, prev) => {
+  if (s.sidebar !== prev.sidebar) savePref('sidebar', s.sidebar ?? 'none');
+  if (s.activeTab !== prev.activeTab || !s.pages.length) return;
+  if (s.fit !== prev.fit || (!s.fit && s.zoom !== prev.zoom)) {
+    clearTimeout(viewPrefTimer);
+    viewPrefTimer = window.setTimeout(() => {
+      const { fit, zoom } = get();
+      VIEW_PREF.fit = fit;
+      VIEW_PREF.zoom = fit ? VIEW_PREF.zoom : zoom;
+      savePref('view', VIEW_PREF);
+    }, 400);
+  }
+});
 
 export const actions = { get, set };

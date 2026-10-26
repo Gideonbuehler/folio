@@ -1,10 +1,11 @@
 import { zipSync } from 'fflate';
-import { actions, closeDocument, insertDocuments, openDocuments, toast } from '../store';
-import { download, pickFiles, saveBytes } from './files';
+import { actions, closeTab, findTab, insertDocuments, openDocuments, patchTab, switchTab, tabState, toast } from '../store';
+import { download, pickFiles, saveBytes, type Picked } from './files';
 import { pdfjs } from './pdfjs';
 import { baseName, readFileDataUrl } from './util';
 import { insertImageFile } from './images';
-import { askDiscard, baseNameOf, isDesktop, readPath } from './native';
+import { askDiscard, baseNameOf, isDesktop, pathsExist, readPath } from './native';
+import { removeRecent, type RecentFile } from './recent';
 import type { ExportOptions } from './export';
 
 const { get, set } = actions;
@@ -14,42 +15,113 @@ export async function confirmDiscard() {
   return isDesktop ? askDiscard() : window.confirm('You have unsaved changes. Discard them?');
 }
 
+/** Opens each file in its own tab, or switches to it if it's already open. */
+export async function openFiles(picked: Picked[]) {
+  for (const p of picked) {
+    const open = p.handle ? await findTab(p.handle) : null;
+    if (open) switchTab(open);
+    else await openDocuments([p]);
+  }
+}
+
 export async function openPdf() {
-  if (!(await confirmDiscard())) return;
-  const picked = await pickFiles({ multiple: false });
-  if (picked.length) await openDocuments(picked);
+  const picked = await pickFiles({ multiple: true });
+  if (picked.length) await openFiles(picked);
 }
 
 export async function combinePdfs() {
-  if (!(await confirmDiscard())) return;
   const picked = await pickFiles({ multiple: true });
   if (picked.length) await openDocuments(picked);
 }
 
 export async function newBlankDocument() {
-  if (!(await confirmDiscard())) return;
   const { PDFDocument } = await import('@cantoo/pdf-lib');
   const d = await PDFDocument.create();
   d.addPage([612, 792]);
   const bytes = await d.save();
   const file = new File([bytes as BlobPart], 'Untitled.pdf', { type: 'application/pdf' });
-  await openDocuments([{ file, handle: null }]);
-  set({ dirty: true });
+  if (await openDocuments([{ file, handle: null }])) set({ dirty: true });
+}
+
+/** Asks what to do with a tab's unsaved changes before it closes. */
+function askUnsaved(name: string) {
+  return new Promise<'save' | 'discard' | 'cancel'>((resolve) =>
+    set({
+      dialog: {
+        kind: 'unsaved',
+        name,
+        resolve: (choice) => {
+          set({ dialog: null });
+          resolve(choice);
+        },
+      },
+    }),
+  );
+}
+
+/** Closes tabs, asking about each one with unsaved changes. Returns false if the user cancelled. */
+export async function closeTabs(ids: string[]) {
+  const back = get().activeTab;
+  for (const id of ids) {
+    const doc = tabState(id);
+    if (!doc) continue;
+    if (doc.dirty) {
+      switchTab(id);
+      const choice = await askUnsaved(doc.fileName);
+      if (choice === 'cancel') return false;
+      if (choice === 'save') {
+        await saveDocument();
+        if (tabState(id)?.dirty) return false;
+      }
+    }
+    closeTab(id);
+  }
+  if (back && tabState(back)) switchTab(back);
+  return true;
 }
 
 export async function closeDoc() {
-  if (await confirmDiscard()) closeDocument();
+  const id = get().activeTab;
+  if (id) await closeTabs([id]);
 }
 
-/** Opens files by path (desktop: launch arguments, double-clicked PDFs). */
+/** Opens files by path (desktop: launch arguments, double-clicked PDFs), each in its own tab. */
 export async function openPaths(paths: string[]) {
-  if (!paths.length || !(await confirmDiscard())) return;
-  try {
-    const picked = await Promise.all(paths.map(async (path) => ({ file: await readPath(path), handle: { path, name: baseNameOf(path) } })));
-    await openDocuments(picked);
-  } catch (e) {
-    toast(`Couldn't open the file: ${(e as Error).message ?? e}`, 'error');
+  for (const path of paths) {
+    try {
+      const handle = { path, name: baseNameOf(path) };
+      const open = await findTab(handle);
+      if (open) switchTab(open);
+      else await openDocuments([{ file: await readPath(path), handle }]);
+    } catch (e) {
+      toast(`Couldn't open ${baseNameOf(path)}: ${(e as Error).message ?? e}`, 'error');
+    }
   }
+}
+
+/** Reopens a recent file; in the browser, permission to read it may need granting again. */
+export async function openRecent(item: RecentFile) {
+  try {
+    if (item.path) {
+      const [exists] = await pathsExist([item.path]);
+      if (!exists) throw new Error('it was moved or deleted');
+      await openPaths([item.path]);
+      return;
+    }
+    const h = item.handle as (FileSystemFileHandle & PermissionMethods) | undefined;
+    if (!h) return;
+    if ((await h.queryPermission?.({ mode: 'read' })) !== 'granted' && (await h.requestPermission?.({ mode: 'read' })) !== 'granted') return;
+    await openFiles([{ file: await h.getFile(), handle: h }]);
+  } catch (e) {
+    const gone = /moved or deleted/.test((e as Error).message) || (e as Error).name === 'NotFoundError';
+    toast(gone ? `${item.name} was moved or deleted` : `Couldn't open ${item.name}: ${(e as Error).message}`, 'error');
+    if (gone) void removeRecent(item.id);
+  }
+}
+
+interface PermissionMethods {
+  queryPermission?: (o: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
+  requestPermission?: (o: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
 }
 
 export async function insertPdfPages(at = get().currentPage + 1) {
@@ -79,6 +151,8 @@ export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; nam
   const s = get();
   if (!s.pages.length || s.busy) return;
   if (s.editing) set({ editing: null });
+  // The save dialog may be up a while; the result belongs to this tab whichever is active by then.
+  const tab = s.activeTab;
   set({ busy: 'Saving…' });
   try {
     const res = await build(opts);
@@ -87,7 +161,7 @@ export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; nam
     const forcePicker = !!opts.saveAs || !!opts.copy || !s.fileHandle;
     const out = await saveBytes(res.bytes, name, opts.copy ? null : s.fileHandle, forcePicker);
     if (!out) return;
-    if (!opts.copy) set({ dirty: false, fileHandle: out.handle ?? s.fileHandle, fileName: out.name });
+    if (!opts.copy) patchTab(tab, { dirty: false, fileHandle: out.handle ?? s.fileHandle, fileName: out.name });
     toast(out.handle ? `Saved ${out.name}` : `Downloaded ${out.name}`, 'success');
     for (const w of res.warnings) toast(w, 'info');
   } catch (e) {

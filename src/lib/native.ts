@@ -55,9 +55,40 @@ export async function chooseSavePath(suggested: string): Promise<string | null> 
   return save({ defaultPath: suggested, filters });
 }
 
-export async function askDiscard(): Promise<boolean> {
+export async function askDiscard(message = 'You have unsaved changes. Discard them?'): Promise<boolean> {
   const { ask } = await dialog();
-  return ask('You have unsaved changes. Discard them?', { title: 'Folio', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Cancel' });
+  return ask(message, { title: 'Folio', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Cancel' });
+}
+
+export async function pathsExist(paths: string[]): Promise<boolean[]> {
+  const { invoke } = await core();
+  return invoke<boolean[]>('paths_exist', { paths });
+}
+
+/* Folio's own files in the app data folder (autosaves, recent files). */
+
+export async function dataRead(name: string): Promise<Uint8Array | null> {
+  const { invoke } = await core();
+  try {
+    return new Uint8Array(await invoke<ArrayBuffer>('data_read', { name }));
+  } catch {
+    return null;
+  }
+}
+
+export async function dataWrite(name: string, bytes: Uint8Array) {
+  const { invoke } = await core();
+  await invoke('data_write', bytes, { headers: { 'x-name': name } });
+}
+
+export async function dataRemove(name: string) {
+  const { invoke } = await core();
+  await invoke('data_remove', { name });
+}
+
+export async function dataList(dir: string): Promise<string[]> {
+  const { invoke } = await core();
+  return invoke<string[]>('data_list', { dir });
 }
 
 export async function openExternal(url: string) {
@@ -84,10 +115,19 @@ export async function setWindowTitle(title: string) {
   await getCurrentWindow().setTitle(title);
 }
 
-/** Asks before closing the window with unsaved changes. */
-export async function guardClose(isDirty: () => boolean) {
+/**
+ * Asks before closing the window with unsaved changes. `unsaved` returns the
+ * question to ask, or null when there's nothing to lose; `beforeClose` runs
+ * once the window is really closing.
+ */
+export async function guardClose(unsaved: () => string | null, beforeClose?: () => Promise<void>) {
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
   return getCurrentWindow().onCloseRequested(async (event) => {
-    if (isDirty() && !(await askDiscard())) event.preventDefault();
+    const question = unsaved();
+    if (question && !(await askDiscard(question))) {
+      event.preventDefault();
+      return;
+    }
+    await beforeClose?.().catch((e) => console.warn(e));
   });
 }
