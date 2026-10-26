@@ -26,6 +26,7 @@ import { uid } from '../lib/util';
 import { BaseShape, CoverShape, cssTransform, HighlightShape, inkPath, NoteView, svgTransform, textStyle, TextView, TopShape } from './objects';
 import { ContextMenu, type MenuItem } from './ui';
 import { liveKey } from '../lib/live';
+import { ocrKey } from '../lib/ocrModel';
 import type { Shown } from './PageView';
 
 const { get, set } = actions;
@@ -668,6 +669,7 @@ function snapAngle(a: Point, p: Point): Point {
 /** Paragraphs and images of the page that Edit mode can change. */
 function useEditables(page: PageItem, pdfPage: PDFPageProxy | null, enabled: boolean) {
   const docs = useStore((s) => s.docs);
+  const ocr = useStore((s) => s.ocr[ocrKey(page)]);
   const [state, setState] = useState<{ paragraphs: Paragraph[]; images: PageImage[]; ready: boolean }>({ paragraphs: [], images: [], ready: false });
   const m = page.m;
   useEffect(() => {
@@ -675,7 +677,7 @@ function useEditables(page: PageItem, pdfPage: PDFPageProxy | null, enabled: boo
     const doc = docs[page.src];
     if (!doc) return;
     let alive = true;
-    Promise.all([getText(doc, page.index), findImages(pdfPage, page).catch(() => [])]).then(async ([tc, images]) => {
+    Promise.all([getText(doc, page.index, ocr), findImages(pdfPage, page).catch(() => [])]).then(async ([tc, images]) => {
       const paragraphs = buildParagraphs(buildLines(tc, page));
       const styles = () => paragraphs.map((p) => paragraphStyle(pdfPage, doc.id, p));
       // Load the fonts first, so a click measures text with the font it will be set in.
@@ -692,7 +694,7 @@ function useEditables(page: PageItem, pdfPage: PDFPageProxy | null, enabled: boo
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, pdfPage, page.src, page.index, m, docs]);
+  }, [enabled, pdfPage, page.src, page.index, m, docs, ocr]);
   return state;
 }
 

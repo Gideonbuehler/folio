@@ -220,20 +220,25 @@ export function rotationMatrix(p: PageItem): Matrix {
 
 /** Merge selection rectangles that sit on the same line. */
 export function mergeLineRects(rects: Rect[]): Rect[] {
-  const sorted = [...rects].sort((a, b) => a.y - b.y || a.x - b.x);
+  const sameLine = (a: Rect, b: Rect) => Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 0.5 * Math.min(a.h, b.h);
+  // Group into lines first: words on one line needn't share the exact same y
+  // (recognized text on a slightly skewed scan, for one), then join left to right.
+  const lines: Rect[][] = [];
+  for (const r of [...rects].sort((a, b) => a.y + a.h / 2 - (b.y + b.h / 2))) {
+    const line = lines.find((l) => sameLine(l[l.length - 1], r));
+    if (line) line.push(r);
+    else lines.push([r]);
+  }
   const out: Rect[] = [];
-  for (const r of sorted) {
-    const last = out[out.length - 1];
-    if (last) {
-      const overlapY = Math.min(last.y + last.h, r.y + r.h) - Math.max(last.y, r.y);
-      const sameLine = overlapY > 0.5 * Math.min(last.h, r.h);
-      const gap = r.x - (last.x + last.w);
-      if (sameLine && gap < Math.max(last.h, r.h) * 0.8 && r.x + r.w > last.x - 1) {
-        out[out.length - 1] = unionRects([last, r]);
+  for (const line of lines) {
+    let last: Rect | null = null;
+    for (const r of line.sort((a, b) => a.x - b.x)) {
+      if (last && r.x - (last.x + last.w) < Math.max(last.h, r.h) * 0.8) {
+        out[out.length - 1] = last = unionRects([last, r]);
         continue;
       }
+      out.push((last = { ...r }));
     }
-    out.push({ ...r });
   }
   return out;
 }

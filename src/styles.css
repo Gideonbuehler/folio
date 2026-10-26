@@ -2365,3 +2365,120 @@ kbd {
     display: none;
   }
 }
+
+/* ==================================================================
+   Text recognition (OCR)
+   ================================================================== */
+
+/* Notice on scanned pages: sits in the page corner at a fixed size. */
+.scan-notice {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 20px);
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: default;
+}
+.scan-notice[role='status'] {
+  padding-right: 12px;
+}
+.scan-notice > svg {
+  flex: none;
+}
+.scan-notice > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scan-notice-action {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.scan-notice-action:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.scan-notice .icon-btn.sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+}
+
+.ocr-progress {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 940;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-md);
+}
+.ocr-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.ocr-progress-head strong {
+  flex: 1;
+  font-weight: 600;
+}
+.ocr-progress-cancel {
+  height: 28px;
+  margin: -4px -6px -4px 0;
+  padding: 0 10px;
+}
+.ocr-progress-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 9px 25px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ocr-progress-page {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.ocr-progress-page:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.ocr-progress-bar {
+  height: 4px;
+  margin-left: 25px;
+  border-radius: 2px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.ocr-progress-bar > div {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.25s ease-out;
+}

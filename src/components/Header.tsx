@@ -26,10 +26,12 @@ import {
   X,
   ChevronDown,
   CopyPlus,
+  ScanText,
 } from 'lucide-react';
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
 import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, printDocument, saveDocument } from '../lib/commands';
 import { MOD } from '../lib/util';
+import { recognizeText, useOcr } from '../lib/ocr';
 import { canSaveInPlace } from '../lib/files';
 import { IconButton, MenuButton, Popover, usePopover, type MenuItem } from './ui';
 import { setZoomAnchor } from './Viewer';
@@ -73,6 +75,9 @@ export function Header() {
         icon: <FileOutput size={I} />,
         onClick: () => extractPages(s.pageSelection.length ? s.pageSelection : [s.pages[s.currentPage].id]),
       },
+      { separator: true },
+      { heading: 'Scan & OCR' },
+      { label: 'Recognize text', icon: <ScanText size={I} />, disabled: !!useOcr.getState().job, onClick: () => void recognizeText() },
       { separator: true },
       { heading: 'Stamp & sign' },
       { label: 'Fill & sign…', icon: <Signature size={I} />, onClick: () => set({ dialog: { kind: 'signature' } }) },

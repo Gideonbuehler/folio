@@ -9,7 +9,9 @@ import { IMAGE_RESOURCES, pageMeasured, viewportFor } from '../lib/pdfjs';
 import { pageText, pageTextKey } from '../lib/pagetext';
 import { linkServiceFor } from '../lib/links';
 import { getLive, pageLiveKeys, type LiveRender } from '../lib/live';
+import { ocrKey } from '../lib/ocrModel';
 import { Overlay } from './Overlay';
+import { ScanNotice } from './Ocr';
 import { OBJ_LABEL } from './labels';
 
 const MAX_CANVAS_PIXELS = 16_777_216;
@@ -32,6 +34,7 @@ interface Props {
 
 export const PageView = memo(function PageView({ page, index, zoom, top, left, objects }: Props) {
   const doc = useStore((s) => s.docs[page.src]);
+  const ocr = useStore((s) => s.ocr[ocrKey(page)]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const annotRef = useRef<HTMLDivElement>(null);
@@ -144,7 +147,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
    * use rewritten paragraphs and text boxes instead of the original wording.
    * Rebuilt when that text changes; zoom is handled by CSS variables.
    */
-  const textKey = useMemo(() => pageTextKey(objects), [objects]);
+  const textKey = useMemo(() => pageTextKey(objects, ocr), [objects, ocr]);
   const [layerKey, setLayerKey] = useState<string | null>(null);
   useEffect(() => {
     const div = textRef.current;
@@ -154,7 +157,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
     // Typing and dragging change the text often; wait for a pause.
     const t = setTimeout(
       () => {
-        pageText(doc, page, objects).then(async ({ key, content }) => {
+        pageText(doc, page, objects, ocr).then(async ({ key, content }) => {
           if (!alive) return;
           div.replaceChildren();
           layer = new TextLayer({ textContentSource: content, container: div, viewport: viewportFor(pdfPage, page, actions.get().zoom) });
@@ -181,7 +184,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
     };
     // The page's objects matter only through textKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfPage, doc, page.index, page.rotation, page.m, textKey]);
+  }, [pdfPage, doc, page.index, page.rotation, page.m, textKey, ocr]);
 
   useEffect(() => {
     if (!textLayer || !pdfPage) return;
@@ -255,6 +258,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
       <div ref={annotRef} className="annotationLayer" />
       <Overlay page={page} zoom={zoom} objects={objects} pdfPage={pdfPage} canvasRef={canvasRef} shown={shown} holes={holes} liveFailed={liveFailed} canvasVersion={canvasVersion} />
       <CommentPopup page={page} zoom={zoom} objects={objects} />
+      <ScanNotice page={page} doc={doc} recognized={!!ocr} />
       {!rendered && <div className="page-loading" />}
     </div>
   );

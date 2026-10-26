@@ -7,6 +7,9 @@ src-tauri/gen/
 # Copied from pdfjs-dist by `npm install` (scripts/copy-pdfjs-assets.mjs)
 public/pdfjs/
 
+# Copied from tesseract.js by `npm install` (scripts/copy-tesseract-assets.mjs)
+public/tesseract/
+
 # Store/extra icon sizes `npx tauri icon` generates but the build doesn't use
 src-tauri/icons/Square*Logo.png
 src-tauri/icons/StoreLogo.png

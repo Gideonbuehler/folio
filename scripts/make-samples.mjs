@@ -381,4 +381,95 @@ if (calibriDir && existsSync(join(calibriDir, 'calibri.ttf'))) {
   }
 }
 
+// A scanned document for text recognition: text pages rendered to pictures at
+// 200 dpi on slightly grey, speckled paper, with only the pictures kept, plus
+// one born-digital page that already has text and must be left alone.
+await scannedSample();
+
+async function scannedSample() {
+  let createCanvas, pdfjs;
+  try {
+    ({ createCanvas } = await import('@napi-rs/canvas'));
+    pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  } catch {
+    console.warn('@napi-rs/canvas is not available; skipping scanned.pdf');
+    return;
+  }
+  const typeset = await PDFDocument.create();
+  const sb = await typeset.embedFont(StandardFonts.HelveticaBold);
+  const sr = await typeset.embedFont(StandardFonts.TimesRoman);
+  const sh = await typeset.embedFont(StandardFonts.Helvetica);
+  const ink = rgb(0.08, 0.08, 0.1);
+  const paragraph = (page, text, top, font = sr, size = 12) => {
+    for (const line of wrap(text, font, size, 468)) {
+      page.drawText(line, { x: 72, y: top, size, font, color: ink });
+      top -= size * 1.45;
+    }
+    return top - size * 0.8;
+  };
+
+  const a = typeset.addPage([612, 792]);
+  a.drawText('Service Agreement', { x: 72, y: 700, size: 24, font: sb, color: ink });
+  a.drawText('Northwind Traders and Contoso Logistics', { x: 72, y: 674, size: 13, font: sh, color: ink });
+  let top = paragraph(
+    a,
+    'This agreement sets out the terms under which Contoso Logistics will store and deliver goods for Northwind Traders. It starts on the first day of the month after both parties sign and runs for twelve months.',
+    630,
+  );
+  top = paragraph(
+    a,
+    'Invoices are sent monthly and are due within thirty days. Late payments carry interest at two percent per month. Either party may end the agreement with ninety days written notice.',
+    top,
+  );
+  a.drawText('Account number: 4417 2290 1185', { x: 72, y: top, size: 12, font: sr, color: ink });
+  a.drawText('Contact: Dana Whitfield, 555-0148', { x: 72, y: top - 20, size: 12, font: sr, color: ink });
+  a.drawText('Signed for Northwind Traders', { x: 72, y: 150, size: 11, font: sh, color: ink });
+  a.drawLine({ start: { x: 72, y: 170 }, end: { x: 300, y: 170 }, thickness: 0.8, color: ink });
+
+  const b = typeset.addPage([612, 792]);
+  b.drawText('Meeting notes', { x: 72, y: 700, size: 22, font: sb, color: ink });
+  top = paragraph(b, 'The warehouse audit is scheduled for the second week of March. Bring the signed delivery records and the updated insurance certificate.', 660);
+  for (const item of ['- Confirm the audit date with the operations team', '- Renew the forklift maintenance contract', '- Send the revised price list to every customer']) {
+    b.drawText(item, { x: 90, y: top, size: 12, font: sr, color: ink });
+    top -= 20;
+  }
+
+  const pdf = await pdfjs.getDocument({
+    data: await typeset.save(),
+    standardFontDataUrl: join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'pdfjs-dist', 'standard_fonts') + '/',
+    disableFontFace: true,
+    isEvalSupported: false,
+  }).promise;
+  const scan = await PDFDocument.create();
+  scan.setTitle('Scanned agreement');
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 200 / 72 });
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = img.data;
+    for (let p = 0; p < px.length; p += 4) {
+      const lum = 0.3 * px[p] + 0.59 * px[p + 1] + 0.11 * px[p + 2];
+      // Paper tone, sensor noise and the odd speck of dust.
+      let v = 28 + (lum / 255) * 218 + (random() - 0.5) * 14;
+      if (random() < 0.0004) v = 70;
+      px[p] = Math.max(0, Math.min(255, v + 2));
+      px[p + 1] = Math.max(0, Math.min(255, v + 1));
+      px[p + 2] = Math.max(0, Math.min(255, v - 3));
+    }
+    ctx.putImageData(img, 0, 0);
+    const picture = await scan.embedJpg(await canvas.encode('jpeg', 85));
+    scan.addPage([612, 792]).drawImage(picture, { x: 0, y: 0, width: 612, height: 792 });
+  }
+  const digital = scan.addPage([612, 792]);
+  const df = await scan.embedFont(StandardFonts.Helvetica);
+  digital.drawText('Appendix (born-digital page)', { x: 72, y: 700, size: 20, font: df });
+  for (const [i, line] of wrap(LOREM, df, 12, 468).entries()) digital.drawText(line, { x: 72, y: 660 - i * 17, size: 12, font: df });
+  writeFileSync(join(out, 'scanned.pdf'), await scan.save());
+}
+
 console.log('samples written to', out);

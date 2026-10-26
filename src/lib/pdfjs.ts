@@ -5,6 +5,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { Matrix, PageItem, Rect, Rotation, SourceDoc } from '../types';
 import { applyMatrix } from './geometry';
 import { classifyFont } from './fonts';
+import { withOcr, type OcrPage } from './ocrModel';
 import { uid } from './util';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -191,14 +192,15 @@ export function viewportFor(page: PDFPageProxy, item: PageItem, scale: number) {
 
 const textCache = new Map<string, Promise<TextContent>>();
 
-export function getText(doc: SourceDoc, index: number): Promise<TextContent> {
+/** The page's text; with `ocr`, words recognized on the scan are included as if they were in the file. */
+export function getText(doc: SourceDoc, index: number, ocr?: OcrPage): Promise<TextContent> {
   const key = `${doc.id}:${index}`;
   let p = textCache.get(key);
   if (!p) {
     p = doc.pdf.getPage(index + 1).then((pg) => pg.getTextContent({ disableNormalization: true }));
     textCache.set(key, p);
   }
-  return p;
+  return ocr ? p.then((tc) => withOcr(tc, ocr)) : p;
 }
 
 export function textItems(tc: TextContent): TextItem[] {

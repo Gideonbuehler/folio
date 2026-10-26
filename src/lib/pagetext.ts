@@ -11,6 +11,7 @@ import { applyMatrix, invertMatrix } from './geometry';
 import { firstBaseline, layoutText, LINE_HEIGHT, measureText, TEXT_PAD } from './fonts';
 import { getLive, pageLiveKeys, type LiveRender } from './live';
 import { getText } from './pdfjs';
+import { withOcr, type OcrPage } from './ocrModel';
 import { mul } from './content';
 
 const NO_HOLES = new Set<string>();
@@ -19,20 +20,31 @@ const r = (v: number) => v.toFixed(2);
 
 const textObjects = (objects: Obj[]) => objects.filter((o): o is TextObj => o.type === 'text' && !!o.text.trim());
 
+/** OCR results are replaced, never mutated, so identity tells them apart. */
+const ocrIds = new WeakMap<OcrPage, number>();
+let ocrSeq = 0;
+const ocrTag = (ocr?: OcrPage) => {
+  if (!ocr) return '';
+  let id = ocrIds.get(ocr);
+  if (!id) ocrIds.set(ocr, (id = ++ocrSeq));
+  return `ocr${id}`;
+};
+
 /** Identifies the text a page shows: equal keys, equal text. */
-export function pageTextKey(objects: Obj[]): string {
+export function pageTextKey(objects: Obj[], ocr?: OcrPage): string {
   const live = pageLiveKeys(objects, NO_HOLES).key;
   const texts = textObjects(objects)
     .map((o) => [o.id, r(o.x), r(o.y), o.size, o.font, o.width ?? '', o.lineHeight ?? '', o.hscale ?? '', o.rotate ?? '', o.text].join(','))
     .sort()
     .join('|');
-  return live || texts ? `${live}#${texts}` : '';
+  const recognized = ocrTag(ocr);
+  return live || texts || recognized ? `${live}#${texts}#${recognized}` : '';
 }
 
 /** Text of an edited page as its live render shows it (one extraction per render). */
 const liveText = new WeakMap<LiveRender, Promise<TextContent>>();
 
-async function baseText(doc: SourceDoc, item: PageItem, objects: Obj[]): Promise<TextContent> {
+async function baseText(doc: SourceDoc, item: PageItem, objects: Obj[], ocr?: OcrPage): Promise<TextContent> {
   if (pageLiveKeys(objects, NO_HOLES).key) {
     try {
       const live = await getLive(doc, item, objects, NO_HOLES);
@@ -41,12 +53,13 @@ async function baseText(doc: SourceDoc, item: PageItem, objects: Obj[]): Promise
         p = live.page.getTextContent({ disableNormalization: true });
         liveText.set(live, p);
       }
-      return await p;
+      // Recognized words of a scanned page join the edited page's text too.
+      return ocr ? withOcr(await p, ocr) : await p;
     } catch (e) {
       console.warn('Text of the edited page is not available; using the original', e);
     }
   }
-  return getText(doc, item.index);
+  return getText(doc, item.index, ocr);
 }
 
 const FONT_FAMILY = { sans: 'sans-serif', serif: 'serif', mono: 'monospace' } as const;
@@ -89,13 +102,13 @@ const MAX_CACHED = 64;
  * the page's own text in reading order, so selections run through them
  * naturally.
  */
-export function pageText(doc: SourceDoc, item: PageItem, objects: Obj[]): Promise<PageText> {
-  const key = pageTextKey(objects);
+export function pageText(doc: SourceDoc, item: PageItem, objects: Obj[], ocr?: OcrPage): Promise<PageText> {
+  const key = pageTextKey(objects, ocr);
   const id = `${doc.id}:${item.index}:${item.m.join(',')}:${key}`;
   let p = cache.get(id);
   if (p) return p;
   p = (async () => {
-    const content = await baseText(doc, item, objects);
+    const content = await baseText(doc, item, objects, ocr);
     const texts = textObjects(objects);
     if (!texts.length) return { key, content };
     // Where each text item starts, in page space (marked-content markers have no position).

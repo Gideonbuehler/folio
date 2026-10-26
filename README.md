@@ -84,6 +84,31 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   to an image, with a warning.
 - Watermarks, page numbers, headers and footers, document properties, password
   protection (AES-256), export pages as PNG/JPEG, and print.
+- **Recognize text** (OCR): scanned pages get a small "Scanned page" notice;
+  click **Recognize text** there for that page, or use **Tools > Recognize
+  text** for every scanned page. Recognition runs on your device
+  ([tesseract.js](https://github.com/naptha/tesseract.js) in a background
+  worker, at 300 dpi) and can be cancelled. Recognized words then behave like
+  any other page text: search finds them, you can select, copy, highlight and
+  redact them, and Edit mode can rewrite them. Recognition is one undoable
+  step. When you save, the words are written as an invisible text layer over
+  the scan, so the file is searchable in any PDF reader. Words under a
+  redaction mark, or replaced in Edit mode, are left out of it. Pages that
+  already have text are never recognized again.
+
+## OCR languages
+
+Folio ships with English. Each language is a `@tesseract.js-data/<code>`
+package, so adding one is a single dependency, for example German:
+
+```bash
+npm install @tesseract.js-data/deu
+```
+
+`npm install` copies every installed language into `public/tesseract`
+(`scripts/copy-tesseract-assets.mjs`), and Folio recognizes pages with all of
+them together (here `eng+deu`). Language codes are listed in
+`node_modules/tesseract.js/docs/tesseract_lang_list.md`.
 
 ## Known limits
 
@@ -103,6 +128,9 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   brochures, stay where they are when you move the photo. Move them separately,
   as you would in Acrobat.
 - Vector artwork already in the PDF (lines, shapes) is not editable yet.
+- OCR reads upright text only; pages scanned sideways should be rotated in the
+  scan first. Recognized text gives no font information, so Edit mode sets
+  rewritten scan text in Helvetica, sized and stretched to match.
 
 ## Layout
 
@@ -113,6 +141,8 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   text is set in, measuring and line breaking, and reuse of fonts embedded in
   the PDF
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
+- `src/lib/ocr.ts`, `src/lib/ocrModel.ts`, `src/lib/ocrPdf.ts`: text recognition,
+  how recognized words join the page text, and the invisible text layer on save
 - `scripts/make-samples.mjs`: generates the test PDFs in `public/samples/`,
-  including a page wrapped in form XObjects and a 500-page document. Open one
-  with `?file=/samples/sample.pdf`.
+  including a scanned document, a page wrapped in form XObjects and a 500-page
+  document. Open one with `?file=/samples/sample.pdf`.
