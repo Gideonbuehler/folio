@@ -2,9 +2,10 @@ import { zipSync } from 'fflate';
 import { actions, closeDocument, insertDocuments, openDocuments, toast } from '../store';
 import { download, pickFiles, saveBytes } from './files';
 import { pdfjs } from './pdfjs';
-import { baseName, readFileDataUrl } from './util';
+import { baseName, formatBytes, readFileDataUrl } from './util';
 import { insertImageFile } from './images';
-import { askDiscard, baseNameOf, isDesktop, readPath } from './native';
+import { askConfirm, askDiscard, baseNameOf, isDesktop, readPath } from './native';
+import { useSignatures } from './signatures';
 import type { ExportOptions } from './export';
 
 const { get, set } = actions;
@@ -75,20 +76,47 @@ function pdfName(name: string) {
   return /\.pdf$/i.test(name) ? name : `${name || 'Document'}.pdf`;
 }
 
+/** The single source document, if the open document is exactly that file, unchanged. */
+export function untouchedDoc() {
+  const s = get();
+  const src = s.pages[0]?.src;
+  const doc = src ? s.docs[src] : undefined;
+  if (!doc || s.objects.length || s.pages.length !== doc.pdf.numPages || doc.pdf.annotationStorage.size > 0) return null;
+  return s.pages.every((p, i) => p.src === src && p.index === i && p.rotation === 0) ? doc : null;
+}
+
+function signatureCount() {
+  const s = get();
+  const byDoc = useSignatures.getState().byDoc;
+  return [...new Set(s.pages.map((p) => p.src))].reduce((n, id) => n + (byDoc[id]?.length ?? 0), 0);
+}
+
 export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; name?: string } & ExportOptions = {}) {
   const s = get();
   if (!s.pages.length || s.busy) return;
   if (s.editing) set({ editing: null });
+  const plain = !opts.flattenForms && !opts.flattenComments && !opts.reduce && !opts.userPassword && !opts.ownerPassword && !opts.pageIds;
+  const signed = signatureCount();
+  const keep = signed > 0 && plain ? untouchedDoc() : null;
+  if (signed && !keep) {
+    const ok = await askConfirm(
+      `This document is digitally signed. Saving ${plain ? 'your changes' : 'with these options'} rewrites it, so the signature${signed === 1 ? '' : 's'} will be removed. Save anyway?`,
+      'Save',
+    );
+    if (!ok) return;
+  }
   set({ busy: 'Saving…' });
   try {
-    const res = await build(opts);
+    // An unchanged signed file is saved byte for byte, so its signatures stay valid.
+    const res = keep ? { bytes: keep.bytes, warnings: [] as string[], reduced: undefined } : await build(opts);
     set({ busy: null });
     const name = pdfName(opts.name ?? s.fileName);
     const forcePicker = !!opts.saveAs || !!opts.copy || !s.fileHandle;
     const out = await saveBytes(res.bytes, name, opts.copy ? null : s.fileHandle, forcePicker);
     if (!out) return;
     if (!opts.copy) set({ dirty: false, fileHandle: out.handle ?? s.fileHandle, fileName: out.name });
-    toast(out.handle ? `Saved ${out.name}` : `Downloaded ${out.name}`, 'success');
+    if (opts.reduce) toast(reductionReport(currentSize(), res.bytes.length, res.reduced?.images ?? 0), 'success');
+    else toast(out.handle ? `Saved ${out.name}` : `Downloaded ${out.name}`, 'success');
     for (const w of res.warnings) toast(w, 'info');
   } catch (e) {
     console.error(e);
@@ -96,6 +124,19 @@ export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; nam
   } finally {
     set({ busy: null });
   }
+}
+
+/** Size of the file(s) the document was opened from. */
+export function currentSize() {
+  const s = get();
+  return [...new Set(s.pages.map((p) => p.src))].reduce((t, id) => t + (s.docs[id]?.bytes.length ?? 0), 0);
+}
+
+function reductionReport(before: number, after: number, images: number) {
+  const pics = images ? ` · ${images} image${images === 1 ? '' : 's'} optimized` : '';
+  if (after >= before) return `Saved at ${formatBytes(after)}: the file was already compact${pics}`;
+  const pct = Math.round((1 - after / before) * 100);
+  return `Reduced from ${formatBytes(before)} to ${formatBytes(after)} (−${pct}%)${pics}`;
 }
 
 export async function extractPages(pageIds: string[]) {

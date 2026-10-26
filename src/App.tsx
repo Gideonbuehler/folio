@@ -33,6 +33,9 @@ import { Welcome } from './components/Welcome';
 import { DialogHost } from './components/Dialogs';
 import { TooltipLayer } from './components/Tooltip';
 import { OcrProgress } from './components/Ocr';
+import { CompareView } from './components/CompareView';
+import { SignatureBar } from './components/CertSign';
+import { useCompare } from './lib/compare';
 
 const { get, set } = actions;
 
@@ -50,11 +53,13 @@ const TOOL_KEYS: Record<string, Tool> = {
   a: 'arrow',
   w: 'whiteout',
   x: 'redact',
+  f: 'fieldText',
 };
 
 export function App() {
   const hasDoc = useStore((s) => s.pages.length > 0);
   const organize = useStore((s) => s.organize);
+  const comparing = useCompare((s) => s.open);
   useTheme();
   useShortcuts();
   useClipboard();
@@ -65,8 +70,8 @@ export function App() {
   return (
     <div className="app">
       <Header />
-      {hasDoc && !organize && <Toolbar />}
-      <main className="main">{hasDoc ? organize ? <OrganizeView /> : <><Sidebar /><Viewer /></> : <Welcome />}</main>
+      {hasDoc && !organize && !comparing && <Toolbar />}
+      <main className="main">{hasDoc ? comparing ? <CompareView /> : organize ? <OrganizeView /> : <><Sidebar /><Viewer /><SignatureBar /></> : <Welcome />}</main>
       <DialogHost />
       <Toasts />
       <OcrProgress />

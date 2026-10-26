@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import type { DocMeta, FontFamily, Obj, PageItem, TextObj } from '../types';
-import { actions, commit, setMeta, setUserName, useStore } from '../store';
-import { exportImages, saveDocument } from '../lib/commands';
+import { actions, commit, savePref, setMeta, setUserName, useStore } from '../store';
+import { currentSize, exportImages, saveDocument } from '../lib/commands';
+import { REDUCE_PRESETS, type ReducePreset } from '../lib/reduce';
 import { settleGeometry } from '../lib/pdfjs';
 import { FONT_LABEL, measureText, useFontsVersion } from '../lib/fonts';
 import { fontStack, loadFontsFor } from '../lib/fontdb';
 import { baseName, formatBytes, MOD, uid } from '../lib/util';
 import { Button, ColorButton, Field, Modal, Segmented, Slider, Toggle } from './ui';
 import { SignatureDialog } from './SignatureDialog';
+import { FieldDialog } from './FieldDialog';
+import { CertSignDialog, SignaturesDialog } from './CertSign';
 
 const close = () => actions.set({ dialog: null });
 
@@ -28,13 +31,19 @@ export function DialogHost() {
     case 'properties':
       return <PropertiesDialog />;
     case 'save':
-      return <SaveDialog />;
+      return <SaveDialog reduce={!!dialog.reduce} />;
     case 'password':
       return <PasswordDialog name={dialog.name} retry={dialog.retry} resolve={dialog.resolve} />;
     case 'exportImages':
       return <ExportImagesDialog />;
     case 'shortcuts':
       return <ShortcutsDialog />;
+    case 'field':
+      return <FieldDialog id={dialog.id} />;
+    case 'certSign':
+      return <CertSignDialog />;
+    case 'signatures':
+      return <SignaturesDialog />;
   }
 }
 
@@ -402,33 +411,45 @@ function PropertiesDialog() {
 /* Save with options                                                    */
 /* ------------------------------------------------------------------ */
 
-function SaveDialog() {
+function SaveDialog({ reduce: reduceFirst }: { reduce: boolean }) {
   const fileName = useStore((s) => s.fileName);
   const [name, setName] = useState(baseName(fileName) || 'Document');
   const [flattenForms, setFlattenForms] = useState(false);
   const [flattenComments, setFlattenComments] = useState(false);
+  const [reduce, setReduce] = useState(reduceFirst);
+  const [preset, setPreset] = useState<ReducePreset>(() => {
+    try {
+      const v = localStorage.getItem('folio.reducePreset');
+      return REDUCE_PRESETS.some((p) => p.id === v) ? (v as ReducePreset) : 'balanced';
+    } catch {
+      return 'balanced';
+    }
+  });
   const [protect, setProtect] = useState(false);
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const mismatch = protect && pw2.length > 0 && pw !== pw2;
   const valid = !protect || (pw.length >= 4 && pw === pw2);
 
+  const chosen = REDUCE_PRESETS.find((p) => p.id === preset)!;
   const go = () => {
     if (!valid) return;
     close();
+    if (reduce) savePref('reducePreset', preset);
     void saveDocument({
       saveAs: true,
       copy: protect,
       name: `${name}.pdf`,
       flattenForms,
       flattenComments,
+      reduce: reduce ? { dpi: chosen.dpi, quality: chosen.quality } : undefined,
       userPassword: protect ? pw : undefined,
     });
   };
 
   return (
     <Modal
-      title="Save with options"
+      title={reduceFirst ? 'Reduce file size' : 'Save with options'}
       onClose={close}
       footer={
         <>
@@ -448,6 +469,16 @@ function SaveDialog() {
       </Field>
       <Toggle checked={flattenForms} onChange={setFlattenForms} label="Flatten form fields (no longer fillable)" />
       <Toggle checked={flattenComments} onChange={setFlattenComments} label="Flatten comments into the page" />
+      <Toggle checked={reduce} onChange={setReduce} label="Reduce file size" />
+      {reduce && (
+        <div className="reduce-options">
+          <Segmented value={preset} onChange={setPreset} options={REDUCE_PRESETS.map((p) => ({ value: p.id, label: p.label, tip: p.hint }))} />
+          <p className="muted small">
+            {chosen.hint}. Larger photos are stored as JPEG, duplicate images and fonts are stored once, and unused data is removed. Now{' '}
+            {formatBytes(currentSize())}.
+          </p>
+        </div>
+      )}
       <Toggle checked={protect} onChange={setProtect} label="Require a password to open" />
       {protect && (
         <div className="row">
@@ -567,6 +598,7 @@ const SHORTCUTS: [string, string][] = [
   ['Line / Arrow', 'L / A'],
   ['Insert image / Fill & sign', 'I / S'],
   ['Whiteout / Redact', 'W / X'],
+  ['Text form field', 'F'],
   ['Open', `${MOD}+O`],
   ['Save / Save as', `${MOD}+S / ${MOD}+Shift+S`],
   ['Print', `${MOD}+P`],

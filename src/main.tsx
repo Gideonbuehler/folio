@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import './pdfjs-layers.css';
 import './styles.css';
+import './acrobat.css';
 import { App } from './App';
 import { openDocuments, useStore } from './store';
 

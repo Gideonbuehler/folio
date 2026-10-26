@@ -156,7 +156,33 @@ export interface FillObj extends Base {
   match?: boolean;
 }
 
-export type Obj = BoxObj | LineObj | InkObj | TextObj | MarkupObj | NoteObj | ImageObj | FillObj;
+export type FieldKind = 'text' | 'multiline' | 'checkbox' | 'radio' | 'dropdown' | 'signature';
+
+/** A form field being designed; saved as a real AcroForm field. */
+export interface FieldObj extends Base {
+  type: 'field';
+  kind: FieldKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Field name. Radio buttons sharing a name form one group; other fields sharing one stay in sync. */
+  name: string;
+  tooltip?: string;
+  required?: boolean;
+  /** Text and dropdown fields: the value it starts with. */
+  value?: string;
+  /** Check boxes and radio buttons: on to start with. */
+  checked?: boolean;
+  /** Radio buttons: the value the group takes when this button is chosen. */
+  choice?: string;
+  /** Dropdown choices. */
+  options?: string[];
+  /** Text size in points; 0 fits the text to the field. */
+  fontSize: number;
+}
+
+export type Obj = BoxObj | LineObj | InkObj | TextObj | MarkupObj | NoteObj | ImageObj | FillObj | FieldObj;
 export type ObjType = Obj['type'];
 
 export type Tool =
@@ -174,7 +200,21 @@ export type Tool =
   | 'arrow'
   | 'note'
   | 'whiteout'
-  | 'redact';
+  | 'redact'
+  /** Drawing the box for a certificate signature. */
+  | 'certSign'
+  | FieldTool;
+
+export const FIELD_TOOLS = {
+  fieldText: 'text',
+  fieldMultiline: 'multiline',
+  fieldCheckbox: 'checkbox',
+  fieldRadio: 'radio',
+  fieldDropdown: 'dropdown',
+  fieldSignature: 'signature',
+} as const satisfies Record<string, FieldKind>;
+
+export type FieldTool = keyof typeof FIELD_TOOLS;
 
 export interface DocMeta {
   title: string;
@@ -209,7 +249,10 @@ export type Dialog =
   | { kind: 'watermark' }
   | { kind: 'pageNumbers' }
   | { kind: 'properties' }
-  | { kind: 'save'; saveAs: boolean }
+  | { kind: 'save'; saveAs: boolean; reduce?: boolean }
   | { kind: 'password'; name: string; retry: boolean; resolve: (pw: string | null) => void }
   | { kind: 'exportImages' }
+  | { kind: 'field'; id: string }
+  | { kind: 'certSign' }
+  | { kind: 'signatures' }
   | { kind: 'shortcuts' };

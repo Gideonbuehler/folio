@@ -55,6 +55,9 @@ import { applyRedaction, hiddenByMarks, marksOn, planRedaction, type RedactionPl
 import { settleGeometry } from './pdfjs';
 import { ocrKey, type OcrPage } from './ocrModel';
 import { addOcrText } from './ocrPdf';
+import { reduceDocument, type ReduceOptions, type ReduceStats } from './reduce';
+import { addFormFields, type FieldEntry } from './formfields';
+import { clearSignatures } from './certsign';
 
 export interface ExportInput {
   docs: Record<string, SourceDoc>;
@@ -73,12 +76,17 @@ export interface ExportOptions {
   flattenComments?: boolean;
   userPassword?: string;
   ownerPassword?: string;
+  /** Downsample and recompress images, drop duplicate and private data. */
+  reduce?: ReduceOptions;
+  /** Object and cross-reference streams (smaller); off for files about to be signed. */
+  objectStreams?: boolean;
   onProgress?: (text: string) => void;
 }
 
 export interface ExportResult {
   bytes: Uint8Array;
   warnings: string[];
+  reduced?: ReduceStats;
 }
 
 const REDACT_SCALE = 2.5; // ~180 dpi raster for redacted pages
@@ -200,6 +208,7 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   }
 
   /* 4. Draw objects and add annotations. */
+  const fields: FieldEntry[] = [];
   for (const [i, { item, page, m, raster }] of outPages.entries()) {
     const objs = byPage.get(item.id) ?? [];
     // Recognized text goes in first, so redaction and Edit-mode changes below
@@ -230,6 +239,10 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     for (const o of objs) {
       // Anything of ours that sits mostly under a redaction mark is left out too.
       if (hiddenByMarks(o, marks)) continue;
+      if (o.type === 'field') {
+        fields.push({ o, page, m });
+        continue;
+      }
       const isComment = o.type === 'highlight' || o.type === 'underline' || o.type === 'strike' || o.type === 'note';
       if (isComment && !opts.flattenComments) annots.push(o);
       else if (o.type === 'note') continue;
@@ -246,6 +259,7 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   if (opts.flattenForms) {
     try {
       rebuildAcroForm(out, outPages.map((p) => p.page), libDocs);
+      addFormFields(out, fields, warnings);
       out.getForm().flatten();
     } catch (e) {
       console.warn(e);
@@ -253,6 +267,13 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     }
   } else {
     rebuildAcroForm(out, outPages.map((p) => p.page), libDocs);
+    addFormFields(out, fields, warnings);
+  }
+  try {
+    // Signatures cover the original bytes; a rewritten file can't keep them.
+    if (clearSignatures(out)) warnings.add('Digital signatures were removed because the document was rewritten. Sign it again if needed.');
+  } catch (e) {
+    console.warn('Could not clear signatures', e);
   }
   if (!opts.pageIds) {
     try {
@@ -272,6 +293,12 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   opts.onProgress?.('Saving…');
   await out.flush();
   collectGarbage(out);
+  let reduced: ReduceStats | undefined;
+  if (opts.reduce) {
+    reduced = await reduceDocument(out, opts.reduce, opts.onProgress);
+    collectGarbage(out);
+    opts.onProgress?.('Saving…');
+  }
   if (opts.userPassword || opts.ownerPassword) {
     out.encrypt({
       userPassword: opts.userPassword ?? '',
@@ -279,8 +306,8 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
       permissions: { printing: 'highResolution', modifying: false, copying: true, annotating: true, fillingForms: true },
     });
   }
-  const bytes = await out.save({ useObjectStreams: true });
-  return { bytes, warnings: [...warnings] };
+  const bytes = await out.save({ useObjectStreams: opts.objectStreams ?? true });
+  return { bytes, warnings: [...warnings], reduced };
 }
 
 export async function loadLib(bytes: Uint8Array, password?: string) {
@@ -512,6 +539,7 @@ async function objectOps(page: PDFPage, o: Obj, res: Resources): Promise<PDFOper
       return ops;
     }
     case 'note':
+    case 'field':
       return [];
   }
 }

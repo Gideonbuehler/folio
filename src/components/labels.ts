@@ -1,4 +1,4 @@
-import type { ObjType } from '../types';
+import type { FieldKind, ObjType } from '../types';
 
 export const OBJ_LABEL: Record<ObjType, string> = {
   rect: 'Rectangle',
@@ -14,4 +14,14 @@ export const OBJ_LABEL: Record<ObjType, string> = {
   image: 'Image',
   whiteout: 'Whiteout',
   redact: 'Redaction',
+  field: 'Form field',
+};
+
+export const FIELD_LABEL: Record<FieldKind, string> = {
+  text: 'Text field',
+  multiline: 'Multi-line text field',
+  checkbox: 'Check box',
+  radio: 'Radio button',
+  dropdown: 'Dropdown',
+  signature: 'Signature field',
 };

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { MessageSquareText } from 'lucide-react';
-import type { Obj, PageItem, TextObj } from '../types';
+import type { FieldObj, Obj, PageItem, TextObj } from '../types';
 import { arrowHead, cropRect, markupQuads, NOTE_SIZE, rotationMatrix } from '../lib/geometry';
 import { layoutText, LINE_HEIGHT, measureText, TEXT_PAD, useFontsVersion } from '../lib/fonts';
 import { fontStack } from '../lib/fontdb';
@@ -84,9 +84,67 @@ export function BaseShape({ o }: { o: Obj }) {
         </svg>
       );
     }
+    case 'field':
+      return <FieldShape o={o} />;
     default:
       return null;
   }
+}
+
+/** A form field as it will look once saved, with its name shown while it's empty. */
+function FieldShape({ o }: { o: FieldObj }) {
+  const size = o.fontSize || Math.max(5, Math.min(12, (o.kind === 'multiline' ? 12 : o.h * 0.62)));
+  const pad = 2;
+  const text = o.kind === 'dropdown' ? o.value || '' : o.kind === 'text' || o.kind === 'multiline' ? o.value || '' : '';
+  const label = o.kind === 'radio' ? `${o.name}: ${o.choice ?? ''}` : o.name;
+  const small = Math.min(7, Math.max(4, o.h * 0.4));
+  const round = o.kind === 'radio';
+  const r = Math.min(o.w, o.h) / 2;
+  return (
+    <g data-id={o.id} className="hit-fill form-field">
+      {round ? (
+        <ellipse cx={o.x + o.w / 2} cy={o.y + o.h / 2} rx={o.w / 2 - 0.5} ry={o.h / 2 - 0.5} fill="#fff" stroke="#8c94a1" strokeWidth={1} />
+      ) : (
+        <rect x={o.x + 0.5} y={o.y + 0.5} width={Math.max(0, o.w - 1)} height={Math.max(0, o.h - 1)} fill="#fff" stroke="#8c94a1" strokeWidth={1} />
+      )}
+      <rect className="field-tint" x={o.x} y={o.y} width={o.w} height={o.h} rx={round ? r : 0} />
+      <svg x={o.x} y={o.y} width={o.w} height={o.h} viewBox={`0 0 ${o.w} ${o.h}`} overflow="hidden">
+        {o.kind === 'checkbox' && o.checked && (
+          <path
+            d={`M${o.w * 0.2} ${o.h * 0.52} L${o.w * 0.42} ${o.h * 0.75} L${o.w * 0.8} ${o.h * 0.25}`}
+            fill="none"
+            stroke="#000"
+            strokeWidth={Math.max(1, Math.min(o.w, o.h) * 0.12)}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+        {o.kind === 'radio' && o.checked && <ellipse cx={o.w / 2} cy={o.h / 2} rx={o.w * 0.25} ry={o.h * 0.25} fill="#000" />}
+        {text &&
+          (o.kind === 'multiline' ? text.split('\n') : [text]).map((line, i) => (
+            <text key={i} x={pad} y={o.kind === 'multiline' ? pad + size * (i + 0.85) : o.h / 2 + size * 0.35} fontSize={size} fontFamily="Helvetica, Arial, sans-serif" fill="#000">
+              {line}
+            </text>
+          ))}
+        {!text && o.kind !== 'checkbox' && o.kind !== 'radio' && (
+          <text className="field-label" x={pad} y={o.kind === 'multiline' || o.kind === 'signature' ? pad + small : o.h / 2 + small * 0.35} fontSize={small}>
+            {o.kind === 'signature' ? `✎ ${label}` : label}
+          </text>
+        )}
+        {o.kind === 'dropdown' && <path d={`M${o.w - 11} ${o.h / 2 - 2} l4 4 l4 -4`} fill="none" stroke="#555" strokeWidth={1.2} />}
+        {o.required && (
+          <text className="field-required" x={o.w - 1.5} y={Math.min(7, o.h * 0.6)} fontSize={Math.min(9, Math.max(5, o.h * 0.5))} textAnchor="end">
+            *
+          </text>
+        )}
+      </svg>
+      {(o.kind === 'checkbox' || o.kind === 'radio') && (
+        <text className="field-label outside" x={o.x + o.w + 3} y={o.y + o.h / 2 + 2.4} fontSize={6.5}>
+          {label}
+        </text>
+      )}
+    </g>
+  );
 }
 
 /** Hides original page content that an edited object replaces. */

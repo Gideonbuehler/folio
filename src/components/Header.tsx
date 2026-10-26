@@ -2,15 +2,18 @@ import {
   BookOpen,
   Download,
   FileImage,
+  FileKey,
   FileOutput,
   FilePlus2,
   Files,
   FolderOpen,
+  GitCompareArrows,
   Hash,
   Info,
   Keyboard,
   LayoutGrid,
   Lock,
+  Minimize2,
   Minus,
   Monitor,
   Moon,
@@ -19,6 +22,7 @@ import {
   Redo2,
   Save,
   Search,
+  ShieldCheck,
   Signature,
   Stamp,
   Sun,
@@ -30,6 +34,8 @@ import {
 } from 'lucide-react';
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
 import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, printDocument, saveDocument } from '../lib/commands';
+import { compareWith } from '../lib/compare';
+import { startCertSign } from '../lib/certflow';
 import { MOD } from '../lib/util';
 import { recognizeText, useOcr } from '../lib/ocr';
 import { canSaveInPlace } from '../lib/files';
@@ -55,6 +61,7 @@ export function Header() {
     { label: 'Save', icon: <Save size={I} />, shortcut: `${MOD}+S`, disabled: !hasDoc, onClick: () => saveDocument() },
     { label: 'Save as…', icon: <Download size={I} />, shortcut: `${MOD}+Shift+S`, disabled: !hasDoc, onClick: () => saveDocument({ saveAs: true }) },
     { label: 'Save with options…', icon: <Lock size={I} />, disabled: !hasDoc, onClick: () => set({ dialog: { kind: 'save', saveAs: true } }) },
+    { label: 'Reduce file size…', icon: <Minimize2 size={I} />, disabled: !hasDoc, onClick: () => set({ dialog: { kind: 'save', saveAs: true, reduce: true } }) },
     { separator: true },
     { label: 'Export pages as images…', icon: <FileImage size={I} />, disabled: !hasDoc, onClick: () => set({ dialog: { kind: 'exportImages' } }) },
     { label: 'Print…', icon: <Printer size={I} />, shortcut: `${MOD}+P`, disabled: !hasDoc, onClick: printDocument },
@@ -78,9 +85,13 @@ export function Header() {
       { separator: true },
       { heading: 'Scan & OCR' },
       { label: 'Recognize text', icon: <ScanText size={I} />, disabled: !!useOcr.getState().job, onClick: () => void recognizeText() },
+      { heading: 'Review' },
+      { label: 'Compare with…', icon: <GitCompareArrows size={I} />, onClick: () => void compareWith() },
       { separator: true },
       { heading: 'Stamp & sign' },
       { label: 'Fill & sign…', icon: <Signature size={I} />, onClick: () => set({ dialog: { kind: 'signature' } }) },
+      { label: 'Sign with certificate…', icon: <FileKey size={I} />, onClick: startCertSign },
+      { label: 'Signatures…', icon: <ShieldCheck size={I} />, onClick: () => set({ dialog: { kind: 'signatures' } }) },
       { label: 'Watermark…', icon: <Stamp size={I} />, onClick: () => set({ dialog: { kind: 'watermark' } }) },
       { label: 'Page numbers & header/footer…', icon: <Hash size={I} />, onClick: () => set({ dialog: { kind: 'pageNumbers' } }) },
       { separator: true },

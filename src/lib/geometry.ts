@@ -93,6 +93,7 @@ export function objBounds(o: Obj, textSize?: (o: TextObj) => { w: number; h: num
     case 'ellipse':
     case 'whiteout':
     case 'redact':
+    case 'field':
       return { x: o.x, y: o.y, w: o.w, h: o.h };
     case 'line':
     case 'arrow': {
@@ -174,6 +175,7 @@ export function resizeObj(o: Obj, from: Rect, to: Rect): Partial<Obj> {
     case 'ellipse':
     case 'whiteout':
     case 'redact':
+    case 'field':
       return { x: to.x, y: to.y, w: Math.max(2, to.w), h: Math.max(2, to.h) } as Partial<Obj>;
     default:
       return {};

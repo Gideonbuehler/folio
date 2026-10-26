@@ -68,6 +68,34 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 - Draw: pen, rectangle, ellipse, line, arrow, text boxes, images, whiteout.
 - Fill & sign: fill form fields, then draw, type or upload a signature, and add
   dates or check marks.
+- Sign with certificate (Tools menu): draw a box (or pick an empty signature
+  field), open your digital ID (.pfx/.p12; the password is typed into the
+  dialog, used once to open the file and never stored), choose a saved
+  handwritten signature or just the name, and Folio saves a signed copy. The
+  signature is PAdES baseline B-B (ETSI.CAdES.detached, SHA-256, RSA or EC),
+  added in an incremental update after all other changes, so its byte range
+  covers the whole file. An unchanged file is signed as is, so signatures
+  already in it stay valid (countersigning). Opening a signed PDF shows who
+  signed, when, and whether the file was changed since; saving an unchanged
+  signed file keeps it byte for byte, and saving edits warns first because
+  the rewritten file can't keep the old signatures. Folio checks the signed
+  bytes and the signature, not certificate authorities or revocation.
+- Create forms (F, or the form field button in the toolbar): drag to place
+  text fields, multi-line text fields, check boxes, radio buttons (buttons with
+  the same group name are one choice), dropdowns and signature fields. Set the
+  name, tooltip, required flag, default value, font size and choices in the
+  context bar or the properties dialog (double-click a field). Saving writes
+  real AcroForm fields with appearances, fillable in any reader; "Make fields
+  fillable now" does the same in place so you can fill them in Folio straight
+  away (Undo turns them back into editable designs).
+- Compare (Tools > Compare with…): pick another version of the document to
+  see the two side by side (scrolling together) or overlaid (what only the old
+  version has in red, what only the new one has in blue). Pages are paired by
+  their text, so inserted or removed pages are found; word-level changes are
+  highlighted in both, a pixel comparison of the rendered pages shows other
+  differences (images, graphics) as a layer you can turn off, and the list of
+  changes steps through them (Up/Down, Esc to close). Unsaved edits are
+  compared as they would be saved.
 - Organize: reorder by dragging thumbnails; rotate, duplicate, insert, extract
   and delete pages; combine several PDFs.
 - Redact: only what lies under a mark is removed, as in Acrobat. Glyphs
@@ -84,6 +112,12 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   to an image, with a warning.
 - Watermarks, page numbers, headers and footers, document properties, password
   protection (AES-256), export pages as PNG/JPEG, and print.
+- Reduce file size (File menu, or Save with options): images shown at more
+  than the chosen resolution (150, 220 or 300 dpi) are downsampled, large photos
+  without transparency are stored as JPEG, identical images, fonts and other
+  streams are stored once, uncompressed streams are compressed, and embedded
+  thumbnails and other applications' private data are dropped. The toast after
+  saving reports the size before and after.
 - **Recognize text** (OCR): scanned pages get a small "Scanned page" notice;
   click **Recognize text** there for that page, or use **Tools > Recognize
   text** for every scanned page. Recognition runs on your device
@@ -140,6 +174,14 @@ them together (here `eng+deu`). Language codes are listed in
 - `src/lib/fontdb.ts`, `src/lib/fonts.ts`, `src/lib/docfonts.ts`: the fonts
   text is set in, measuring and line breaking, and reuse of fonts embedded in
   the PDF
+- `src/lib/reduce.ts`: Reduce file size (runs at the end of `buildPdf`)
+- `src/lib/compare.ts`: page pairing, word diff and pixel diff behind
+  `src/components/CompareView.tsx`
+- `src/lib/certsign.ts`: incremental signing and signature checks;
+  `src/lib/certs.ts` digital IDs and CMS (node-forge opens the .pfx/.p12,
+  Web Crypto signs and verifies), `src/lib/der.ts` the DER they need
+- `src/lib/formfields.ts`: writes designed form fields as AcroForm fields;
+  `src/lib/forms.ts` names them and makes them fillable in place
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
 - `src/lib/ocr.ts`, `src/lib/ocrModel.ts`, `src/lib/ocrPdf.ts`: text recognition,
   how recognized words join the page text, and the invisible text layer on save
