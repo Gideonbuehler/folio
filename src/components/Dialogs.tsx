@@ -3,12 +3,16 @@ import { Lock } from 'lucide-react';
 import type { DocMeta, FontFamily, Obj, PageItem, TextObj } from '../types';
 import { actions, commit, setMeta, setUserName, useStore } from '../store';
 import { exportImages, saveDocument } from '../lib/commands';
+import { settleGeometry } from '../lib/pdfjs';
 import { FONT_LABEL, measureText } from '../lib/fonts';
 import { baseName, formatBytes, MOD, uid } from '../lib/util';
 import { Button, ColorButton, Field, Modal, Segmented, Slider, Toggle } from './ui';
 import { SignatureDialog } from './SignatureDialog';
 
 const close = () => actions.set({ dialog: null });
+
+/** Page sizes are needed to place objects on every page; a large document may still be measuring some. */
+const allMeasured = () => settleGeometry(actions.get().pages, actions.get().docs);
 
 export function DialogHost() {
   const dialog = useStore((s) => s.dialog);
@@ -117,7 +121,8 @@ function WatermarkDialog() {
   const [scope, setScope] = useState<Scope>('all');
   const [range, setRange] = useState('');
 
-  const apply = () => {
+  const apply = async () => {
+    await allMeasured();
     const pages = scopePages(scope, range);
     if (!text.trim() || !pages.length) return;
     const objs: Obj[] = pages.map((p) => {
@@ -221,7 +226,8 @@ function PageNumbersDialog() {
       .replace(/\{date\}/g, new Date().toLocaleDateString())
       .replace(/\{file\}/g, baseName(fileName));
 
-  const apply = () => {
+  const apply = async () => {
+    await allMeasured();
     let pages = scopePages(scope, range);
     if (skipFirst) pages = pages.filter((p) => p !== actions.get().pages[0]);
     if (!pages.length || !format.trim()) return;

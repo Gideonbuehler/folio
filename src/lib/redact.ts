@@ -3,15 +3,17 @@
  * redaction mark is removed. Text loses the individual glyphs inside a mark
  * (neighbouring words stay real, selectable, editable text), images get the
  * covered pixels painted over in a new copy, vector shapes mostly inside a mark
- * are dropped, and annotations touching a mark are deleted. Pages with content
- * that can't be removed this way are flattened instead, as a safe fallback.
+ * are dropped, and annotations touching a mark are deleted. The same goes for
+ * content inside form XObjects: the page gets its own copy of each form it
+ * changes. Pages with content that can't be removed this way are flattened
+ * instead, as a safe fallback.
  */
 import { PDFArray, PDFDict, PDFName, PDFNumber, type PDFDocument, type PDFPage } from '@cantoo/pdf-lib';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { FillObj, Matrix, Obj, PageItem, Rect } from '../types';
 import { applyMatrix, objBounds } from './geometry';
 import { measureText } from './fonts';
-import { analyze, overlap, pageContentBytes, parseContent, quadRect, redactRun, rewrite, setPageContent, type RunItem, type TextRun } from './content';
+import { analyzePage, ContentEdits, overlap, quadRect, redactRun, type OpRef, type RunItem, type TextRun } from './content';
 import { findImages, redactedImage } from './pdfjs';
 
 export interface RedactionPlan {
@@ -50,19 +52,18 @@ export function hiddenByMarks(o: Obj, marks: Rect[]) {
  * prepares redacted copies of any images under the marks.
  */
 export async function planRedaction(lib: PDFDocument, item: PageItem, pdfPage: PDFPageProxy, marks: FillObj[]): Promise<RedactionPlan> {
-  const page = lib.getPage(item.index);
-  const bytes = pageContentBytes(page);
-  if (!bytes) return { fallback: null, images: [] };
-  const a = analyze(parseContent(bytes), lib, page.node.Resources());
+  const a = analyzePage(lib.getPage(item.index));
+  if (!a) return { fallback: null, images: [] };
   const m = item.m;
 
+  // Forms are analysed like the page itself; only ones that can't be read are a problem.
   for (const f of a.forms) {
-    if (touches(quadRect(f.quad, m), marks)) return { fallback: 'it draws grouped content (a form XObject) under a redaction mark', images: [] };
+    if (touches(quadRect(f.quad, m), marks)) return { fallback: 'it draws grouped content (a form XObject) that could not be read under a redaction mark', images: [] };
   }
 
   const hits = a.images.map((im) => ({ im, rect: quadRect(im.quad, m) })).filter((h) => touches(h.rect, marks));
   if (!hits.length) return { fallback: null, images: [] };
-  const decoded = (await findImages(pdfPage, item, { all: true })).filter((d) => !d.inForm);
+  const decoded = await findImages(pdfPage, item, { all: true });
   const used = new Set<number>();
   const images: RedactionPlan['images'] = [];
   for (const { im, rect } of hits) {
@@ -92,11 +93,10 @@ export async function planRedaction(lib: PDFDocument, item: PageItem, pdfPage: P
 
 /** Applies a plan to the copied page in the output document. */
 export async function applyRedaction(out: PDFDocument, page: PDFPage, m: Matrix, marks: FillObj[], plan: RedactionPlan) {
-  const bytes = pageContentBytes(page);
-  if (bytes) {
-    const a = analyze(parseContent(bytes), out, page.node.Resources());
-    const reps = new Map<number, string | Uint8Array>();
-    const strip = new Set<number>();
+  const a = analyzePage(page);
+  if (a) {
+    const edits = new ContentEdits(page);
+    const strip = new Set<OpRef>();
 
     // Text: drop the glyphs under the marks, keep everything else in place.
     const glyphRect = (run: TextRun, it: RunItem) =>
@@ -109,11 +109,11 @@ export async function applyRedaction(out: PDFDocument, page: PDFPage, m: Matrix,
         const cy = g.y + g.h / 2;
         return covered(g, marks) >= 0.3 || marks.some((mk) => cx >= mk.x && cx <= mk.x + mk.w && cy >= mk.y && cy <= mk.y + mk.h);
       };
-      const replacement = redactRun(a.ops[run.index], run, drop);
+      const replacement = redactRun(run.node.ops[run.index], run, drop);
       if (replacement === null) continue;
-      reps.set(run.index, replacement);
+      edits.set(run.node, run.index, replacement);
       // Alternate text attached to the surrounding tags could repeat what was removed.
-      for (const i of run.marked) if (a.inlineProps.has(i)) strip.add(i);
+      for (const mk of run.marked) if (mk.node.inlineProps.has(mk.index)) strip.add(mk);
     }
 
     // Vector shapes that sit mostly under a mark (signatures, scribbles) go entirely.
@@ -132,7 +132,7 @@ export async function applyRedaction(out: PDFDocument, page: PDFPage, m: Matrix,
       );
       const inside = area(r) > 0 ? covered(r, marks) : marks.some((mk) => r.x >= mk.x && r.x <= mk.x + mk.w && r.y >= mk.y && r.y <= mk.y + mk.h) ? 1 : 0;
       if (inside < 0.8) continue;
-      for (let k = p.start; k <= p.end; k++) if (!reps.has(k) && isPathOp(a.ops[k].op)) reps.set(k, '');
+      for (let k = p.start; k <= p.end; k++) if (!edits.has(p.node, k) && isPathOp(p.node.ops[k].op)) edits.set(p.node, k, '');
     }
 
     // Images: swap in the copy with the covered pixels painted over.
@@ -141,23 +141,22 @@ export async function applyRedaction(out: PDFDocument, page: PDFPage, m: Matrix,
       const rect = quadRect(im.quad, m);
       if (!touches(rect, marks)) continue;
       if (im.mask) {
-        reps.set(im.index, '');
+        edits.set(im.node, im.index, '');
         continue;
       }
       const i = plan.images.findIndex((p, k) => !used.has(k) && iou(p.rect, rect) > 0.9);
       if (i < 0) {
         // Shouldn't happen (the plan saw the same content); never keep it unredacted.
-        reps.set(im.index, '');
+        edits.set(im.node, im.index, '');
         continue;
       }
       used.add(i);
       const img = await out.embedPng(plan.images[i].png);
-      const name = page.node.newXObject('Redacted', img.ref);
-      reps.set(im.index, `${name.toString()} Do`);
+      edits.set(im.node, im.index, `${edits.xobject(im.node, 'Redacted', img.ref)} Do`);
     }
 
-    for (const i of strip) if (!reps.has(i)) reps.set(i, `/${a.inlineProps.get(i)} BMC`);
-    if (reps.size) setPageContent(page, rewrite(bytes, a.ops, reps));
+    for (const mk of strip) if (!edits.has(mk.node, mk.index)) edits.set(mk.node, mk.index, `/${mk.node.inlineProps.get(mk.index)} BMC`);
+    if (edits.size) edits.commit();
   }
   removeAnnotations(out, page, m, marks);
 }
