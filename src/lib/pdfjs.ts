@@ -20,6 +20,8 @@ const DOC_OPTIONS = {
   standardFontDataUrl: `${ASSETS}standard_fonts/`,
   wasmUrl: `${ASSETS}wasm/`,
   iccUrl: `${ASSETS}iccs/`,
+  // Keeps each font's real name on the main thread; Edit mode matches fonts by it.
+  fontExtraProperties: true,
 };
 
 /**
@@ -310,7 +312,7 @@ export function lineFont(page: PDFPageProxy, line: TextLine) {
     /* font not loaded yet */
   }
   const guess = classifyFont(name, line.cssFamily);
-  return { font: guess.font, bold: bold || guess.bold, italic: italic || guess.italic };
+  return { name, font: guess.font, metric: guess.metric, bold: !!(bold || guess.bold), italic: !!(italic || guess.italic) };
 }
 
 /* ------------------------------------------------------------------ */

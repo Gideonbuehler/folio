@@ -55,7 +55,7 @@ const FONT_FAMILY = { sans: 'sans-serif', serif: 'serif', mono: 'monospace' } as
 function objectItems(o: TextObj, item: PageItem): TextItem[] {
   const lh = o.lineHeight ?? LINE_HEIGHT;
   const hs = o.hscale ?? 1;
-  const base = firstBaseline(o.font, o.size, lh);
+  const base = firstBaseline(o, lh);
   // Page space -> PDF user space, with the object's rotation about its center.
   let toUser: Matrix = invertMatrix(item.m);
   if (o.rotate) {

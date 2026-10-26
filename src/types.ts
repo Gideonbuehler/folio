@@ -46,7 +46,8 @@ export interface PageItem {
   m: Matrix;
 }
 
-export type FontFamily = 'sans' | 'serif' | 'mono';
+/** Bundled font families (see lib/fontdb.ts). */
+export type FontFamily = 'sans' | 'serif' | 'mono' | 'carlito' | 'caladea' | 'noto';
 
 interface Base {
   id: string;
@@ -93,6 +94,8 @@ export interface TextObj extends Base {
   y: number;
   text: string;
   font: FontFamily;
+  /** Font embedded in the source PDF, used instead of `font` while it can draw the text. */
+  embedded?: string;
   size: number;
   bold: boolean;
   italic: boolean;
