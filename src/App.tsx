@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, FilePlus2, FolderOpen, Info, Loader2, TriangleAlert } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { CheckCircle2, FilePlus2, Files, FolderOpen, Info, Loader2, TriangleAlert } from 'lucide-react';
 import type { Obj, Tool } from './types';
 import {
   actions,
   addObject,
+  anyDirty,
   copyObjects,
+  cycleTab,
   deleteObjects,
   duplicateObjects,
   insertDocuments,
@@ -20,11 +22,16 @@ import {
   zoomStep,
 } from './store';
 import { moveObj } from './lib/geometry';
-import { confirmDiscard, openPaths, openPdf, pickAndInsertImage, printDocument, saveDocument } from './lib/commands';
+import { closeDoc, openFiles, openPaths, openPdf, pickAndInsertImage, printDocument, saveDocument } from './lib/commands';
 import { guardClose, isDesktop, onOpenFiles, setWindowTitle, startupFiles } from './lib/native';
+import { endSession, startRecovery } from './lib/recovery';
+import { startRecent } from './lib/recent';
+import type { Picked } from './lib/files';
 import { insertImageFile } from './lib/images';
 import { uid } from './lib/util';
 import { Header } from './components/Header';
+import { TabBar } from './components/TabBar';
+import { RecoveryPrompt } from './components/SessionDialogs';
 import { Toolbar } from './components/Toolbar';
 import { Sidebar } from './components/Sidebar';
 import { Viewer, setZoomAnchor } from './components/Viewer';
@@ -60,7 +67,11 @@ export function App() {
   const hasDoc = useStore((s) => s.pages.length > 0);
   const organize = useStore((s) => s.organize);
   const comparing = useCompare((s) => s.open);
+  const hasTabs = useStore((s) => s.tabs.length > 0);
+  // Each tab gets fresh views, so scroll positions and per-page renders never leak between documents.
+  const tab = useStore((s) => s.activeTab) ?? '';
   useTheme();
+  useSession();
   useShortcuts();
   useClipboard();
   useUnloadGuard();
@@ -70,9 +81,27 @@ export function App() {
   return (
     <div className="app">
       <Header />
+      {hasTabs && <TabBar />}
       {hasDoc && !organize && !comparing && <Toolbar />}
-      <main className="main">{hasDoc ? comparing ? <CompareView /> : organize ? <OrganizeView /> : <><Sidebar /><Viewer /><SignatureBar /></> : <Welcome />}</main>
+      <main className="main">
+        {hasDoc ? (
+          comparing ? (
+            <CompareView />
+          ) : organize ? (
+            <OrganizeView key={tab} />
+          ) : (
+            <Fragment key={tab}>
+              <Sidebar />
+              <Viewer />
+              <SignatureBar />
+            </Fragment>
+          )
+        ) : (
+          <Welcome />
+        )}
+      </main>
       <DialogHost />
+      <RecoveryPrompt />
       <Toasts />
       <OcrProgress />
       <Busy />
@@ -98,6 +127,21 @@ function useTheme() {
   }, [theme]);
 }
 
+/** Autosave with crash recovery, and the recent files list. */
+function useSession() {
+  useEffect(() => {
+    void startRecovery();
+    startRecent();
+  }, []);
+}
+
+/** What closing the window would lose, as the question to ask; null if nothing. */
+function unsavedQuestion() {
+  const n = actions.get().tabs.filter((t) => (t.saved ?? actions.get()).dirty).length;
+  if (!n) return null;
+  return n === 1 ? 'You have unsaved changes. Discard them?' : `${n} documents have unsaved changes. Discard them?`;
+}
+
 /** Desktop app: files from Explorer, the close prompt and the window title. */
 function useDesktop() {
   const fileName = useStore((s) => s.fileName);
@@ -110,7 +154,8 @@ function useDesktop() {
       .then((paths) => openPaths(paths))
       .catch(() => {});
     onOpenFiles((paths) => void openPaths(paths)).then((u) => (stopFiles = u));
-    guardClose(() => get().dirty).then((u) => (stopClose = u));
+    // A clean close clears the autosaves, so the next launch doesn't offer to restore them.
+    guardClose(unsavedQuestion, endSession).then((u) => (stopClose = u));
     return () => {
       stopFiles?.();
       stopClose?.();
@@ -127,7 +172,7 @@ function useUnloadGuard() {
   useEffect(() => {
     if (isDesktop) return; // the window close prompt covers this in the app
     const h = (e: BeforeUnloadEvent) => {
-      if (get().dirty) {
+      if (anyDirty()) {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -178,10 +223,21 @@ function useShortcuts() {
       if (s.dialog || s.busy) return;
 
       if (mod) {
+        // Tab switching works from anywhere, even while typing (blurring commits the edit first).
+        if (e.key === 'Tab' || e.key === 'PageDown' || e.key === 'PageUp') {
+          e.preventDefault();
+          if (s.tabs.length < 2) return;
+          (document.activeElement as HTMLElement | null)?.blur?.();
+          cycleTab(e.key === 'PageUp' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1);
+          return;
+        }
         const handled = (() => {
           switch (key) {
             case 'o':
               void openPdf();
+              return true;
+            case 'w':
+              if (s.activeTab) void closeDoc();
               return true;
             case 's':
               if (hasDoc) void saveDocument({ saveAs: e.shiftKey });
@@ -423,6 +479,7 @@ function Busy() {
 function DropOverlay() {
   const hasDoc = useStore((s) => s.pages.length > 0);
   const [active, setActive] = useState(false);
+  const [count, setCount] = useState(0);
   const depth = useRef(0);
 
   useEffect(() => {
@@ -430,6 +487,7 @@ function DropOverlay() {
     const enter = (e: DragEvent) => {
       if (!isPdfDrag(e)) return;
       depth.current++;
+      setCount([...(e.dataTransfer?.items ?? [])].filter((i) => i.kind === 'file').length);
       setActive(true);
     };
     const leave = () => {
@@ -459,7 +517,7 @@ function DropOverlay() {
   }, []);
 
   if (!active) return null;
-  const zone = (mode: 'open' | 'insert', icon: React.ReactNode, title: string, text: string) => (
+  const zone = (mode: DropMode, icon: React.ReactNode, title: string, text: string) => (
     <div
       className="drop-zone"
       onDragOver={(e) => {
@@ -482,22 +540,35 @@ function DropOverlay() {
   );
   return (
     <div className="drop-overlay">
-      {zone('open', <FolderOpen size={28} />, hasDoc ? 'Open' : 'Drop to open', hasDoc ? 'Replace the current document' : 'Several files are combined into one')}
+      {zone('open', <FolderOpen size={28} />, hasDoc ? 'Open' : 'Drop to open', count > 1 ? 'Each file in its own tab' : 'In a new tab')}
+      {count > 1 && zone('combine', <Files size={28} />, 'Combine', 'Merge the files into one document')}
       {hasDoc && zone('insert', <FilePlus2 size={28} />, 'Insert pages', `Add after page ${get().currentPage + 1}`)}
     </div>
   );
 }
 
-async function handleFiles(e: DragEvent, mode: 'open' | 'insert') {
-  const files = [...(e.dataTransfer?.files ?? [])];
-  const pdfs = files.filter((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+type DropMode = 'open' | 'combine' | 'insert';
+
+type HandleItem = DataTransferItem & { getAsFileSystemHandle?: () => Promise<FileSystemHandle | null> };
+
+async function handleFiles(e: DragEvent, mode: DropMode) {
+  const items = [...(e.dataTransfer?.items ?? [])].filter((i) => i.kind === 'file') as HandleItem[];
+  const files = items.map((i) => i.getAsFile()).filter((f): f is File => !!f);
+  // In Chromium browsers a dropped file comes with a handle, so Ctrl+S can save back to it and it
+  // joins the recent files. It has to be asked for while the drop event lasts. (The desktop app
+  // saves by path instead.)
+  const handles = isDesktop ? [] : items.map((i) => i.getAsFileSystemHandle?.().catch(() => null) ?? Promise.resolve(null));
+  const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
   const images = files.filter((f) => f.type.startsWith('image/'));
   if (images.length && get().pages.length) images.forEach((f) => insertImageFile(f));
-  if (!pdfs.length) return;
-  const picked = pdfs.map((file) => ({ file, handle: null }));
-  if (mode === 'insert') await insertDocuments(picked, get().currentPage + 1);
-  else {
-    if (!(await confirmDiscard())) return;
-    await openDocuments(picked);
+  const picked: Picked[] = [];
+  for (let k = 0; k < files.length; k++) {
+    if (!isPdf(files[k])) continue;
+    const h = await handles[k];
+    picked.push({ file: files[k], handle: h?.kind === 'file' ? (h as FileSystemFileHandle) : null });
   }
+  if (!picked.length) return;
+  if (mode === 'insert') await insertDocuments(picked, get().currentPage + 1);
+  else if (mode === 'combine') await openDocuments(picked);
+  else await openFiles(picked);
 }

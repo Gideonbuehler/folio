@@ -31,11 +31,14 @@ import {
   ChevronDown,
   CopyPlus,
   ScanText,
+  FileText,
+  History,
 } from 'lucide-react';
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
-import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, printDocument, saveDocument } from '../lib/commands';
+import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, openRecent, printDocument, saveDocument } from '../lib/commands';
 import { compareWith } from '../lib/compare';
 import { startCertSign } from '../lib/certflow';
+import { clearRecent, useRecent, visibleRecent } from '../lib/recent';
 import { MOD } from '../lib/util';
 import { recognizeText, useOcr } from '../lib/ocr';
 import { canSaveInPlace } from '../lib/files';
@@ -57,6 +60,7 @@ export function Header() {
     { label: 'Open…', icon: <FolderOpen size={I} />, shortcut: `${MOD}+O`, onClick: openPdf },
     { label: 'Combine files…', icon: <Files size={I} />, onClick: combinePdfs },
     { label: 'New blank document', icon: <FilePlus2 size={I} />, onClick: newBlankDocument },
+    ...recentItems(),
     { separator: true },
     { label: 'Save', icon: <Save size={I} />, shortcut: `${MOD}+S`, disabled: !hasDoc, onClick: () => saveDocument() },
     { label: 'Save as…', icon: <Download size={I} />, shortcut: `${MOD}+Shift+S`, disabled: !hasDoc, onClick: () => saveDocument({ saveAs: true }) },
@@ -67,7 +71,7 @@ export function Header() {
     { label: 'Print…', icon: <Printer size={I} />, shortcut: `${MOD}+P`, disabled: !hasDoc, onClick: printDocument },
     { separator: true },
     { label: 'Document properties…', icon: <Info size={I} />, disabled: !hasDoc, onClick: () => set({ dialog: { kind: 'properties' } }) },
-    { label: 'Close document', icon: <X size={I} />, disabled: !hasDoc, onClick: closeDoc },
+    { label: 'Close tab', icon: <X size={I} />, shortcut: `${MOD}+W`, disabled: !hasDoc, onClick: closeDoc },
   ];
 
   const toolItems = (): MenuItem[] => {
@@ -161,6 +165,18 @@ export function Header() {
       </div>
     </header>
   );
+}
+
+/** The File menu's recent files: the latest few, then a way to clear the list. */
+function recentItems(): MenuItem[] {
+  const items = visibleRecent(useRecent.getState().items).slice(0, 8);
+  if (!items.length) return [];
+  return [
+    { separator: true },
+    { heading: 'Recent' },
+    ...items.map((it) => ({ label: it.name, icon: <FileText size={I} />, onClick: () => void openRecent(it) })),
+    { label: 'Clear recent files', icon: <History size={I} />, onClick: () => void clearRecent() },
+  ];
 }
 
 function ZoomControl() {

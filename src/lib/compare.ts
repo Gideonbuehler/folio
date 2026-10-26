@@ -640,6 +640,10 @@ function forgetVisual() {
   for (const v of cget().visual.values()) for (const u of [v.a, v.b]) if (u) URL.revokeObjectURL(u);
 }
 
+useStore.subscribe((s, prev) => {
+  if (s.activeTab !== prev.activeTab && useCompare.getState().open) closeCompare();
+});
+
 export function closeCompare() {
   run++;
   const st = cget();

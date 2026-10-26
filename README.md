@@ -37,8 +37,9 @@ The installer:
 
 The app adds native Open/Save dialogs and true save-in-place: Ctrl+S writes
 through a temporary file, so a failed save never damages the original. Opening
-a second PDF from Explorer hands it to the running window. Closing with unsaved
-changes asks first, and web links in documents open in your default browser.
+a second PDF from Explorer hands it to the running window, in a new tab. Closing
+with unsaved changes asks first, web links in documents open in your default
+browser, and the window reopens at the size and place you left it.
 
 Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 
@@ -129,6 +130,15 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   the scan, so the file is searchable in any PDF reader. Words under a
   redaction mark, or replaced in Edit mode, are left out of it. Pages that
   already have text are never recognized again.
+
+- Tabs: several documents open at once, each with its own undo history, zoom
+  and scroll position. Ctrl+Tab / Ctrl+Shift+Tab switch, Ctrl+W closes, drag a
+  tab to reorder it. Recent files are on the start screen and in the File menu.
+- Autosave: a few seconds after a change, each unsaved document is copied to
+  this computer (`%APPDATA%\app.folio.pdfeditor\recovery` in the desktop app,
+  IndexedDB in the browser). If Folio crashes or is killed, the next start
+  offers to restore them. Saving, closing a document or closing the window
+  removes its copy. Nothing is sent anywhere.
 
 ## OCR languages
 

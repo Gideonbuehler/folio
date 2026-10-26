@@ -106,8 +106,13 @@ export function getLive(doc: SourceDoc, item: PageItem, objects: Obj[], holes: R
   return p;
 }
 
-export function forgetLiveSources() {
-  libs.clear();
-  for (const p of builds.values()) void p.then((l) => l.pdf.loadingTask.destroy()).catch(() => {});
-  builds.clear();
+/** Drops cached renders of the given sources (all of them by default). */
+export function forgetLiveSources(docIds?: string[]) {
+  const gone = (id: string) => !docIds || docIds.includes(id);
+  for (const id of [...libs.keys()]) if (gone(id)) libs.delete(id);
+  for (const [key, p] of [...builds]) {
+    if (!gone(key.slice(0, key.indexOf(':')))) continue;
+    builds.delete(key);
+    void p.then((l) => l.pdf.loadingTask.destroy()).catch(() => {});
+  }
 }

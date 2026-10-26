@@ -12,6 +12,7 @@ import { Button, ColorButton, Field, Modal, Segmented, Slider, Toggle } from './
 import { SignatureDialog } from './SignatureDialog';
 import { FieldDialog } from './FieldDialog';
 import { CertSignDialog, SignaturesDialog } from './CertSign';
+import { UnsavedDialog } from './SessionDialogs';
 
 const close = () => actions.set({ dialog: null });
 
@@ -44,6 +45,8 @@ export function DialogHost() {
       return <CertSignDialog />;
     case 'signatures':
       return <SignaturesDialog />;
+    case 'unsaved':
+      return <UnsavedDialog name={dialog.name} resolve={dialog.resolve} />;
   }
 }
 
@@ -600,6 +603,8 @@ const SHORTCUTS: [string, string][] = [
   ['Whiteout / Redact', 'W / X'],
   ['Text form field', 'F'],
   ['Open', `${MOD}+O`],
+  ['Next / previous tab', `${MOD}+Tab / ${MOD}+Shift+Tab`],
+  ['Close tab', `${MOD}+W`],
   ['Save / Save as', `${MOD}+S / ${MOD}+Shift+S`],
   ['Print', `${MOD}+P`],
   ['Undo / Redo', `${MOD}+Z / ${MOD}+Shift+Z`],

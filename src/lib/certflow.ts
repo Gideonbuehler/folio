@@ -68,7 +68,8 @@ export async function emptySignatureFields(): Promise<SignTarget[]> {
   for (const o of s.objects) {
     if (o.type === 'field' && o.kind === 'signature') out.push({ key: o.name, label: `${o.name} (page ${pageNo(o.page)}, not saved yet)` });
   }
-  const signed = new Set(Object.values(useSignatures.getState().byDoc).flatMap((l) => l.map((x) => x.field)));
+  const byDoc = useSignatures.getState().byDoc;
+  const signed = new Set(Object.keys(s.docs).flatMap((id) => (byDoc[id] ?? []).map((x) => x.field)));
   for (const [i, p] of s.pages.entries()) {
     const doc = s.docs[p.src];
     if (!doc) continue;

@@ -255,4 +255,5 @@ export type Dialog =
   | { kind: 'field'; id: string }
   | { kind: 'certSign' }
   | { kind: 'signatures' }
-  | { kind: 'shortcuts' };
+  | { kind: 'shortcuts' }
+  | { kind: 'unsaved'; name: string; resolve: (choice: 'save' | 'discard' | 'cancel') => void };
