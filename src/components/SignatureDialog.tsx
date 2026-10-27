@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Calendar, Check, Trash2, Upload, X as XIcon } from 'lucide-react';
-import type { InkObj, TextObj } from '../types';
+import type { InkObj, StampTarget, TextObj } from '../types';
 import { actions, addObject, savePref, toast } from '../store';
+import { initialsOf, signerById } from '../lib/envelope';
+import { stampField } from '../lib/signing';
 import { placeImage, normalizeImage } from '../lib/images';
 import { loadImage, uid } from '../lib/util';
 import { Button, Modal, Segmented, Toggle } from './ui';
@@ -17,12 +19,12 @@ const INKS = ['#1a1a1a', '#1c3faa', '#c92a2a'];
 
 /** Signatures saved in Fill & sign, newest first. */
 export function savedSignatures(): string[] {
-  return loadSaved();
+  return loadSaved('signatures');
 }
 
-function loadSaved(): string[] {
+function loadSaved(key: 'signatures' | 'initials'): string[] {
   try {
-    return JSON.parse(localStorage.getItem('folio.signatures') || '[]');
+    return JSON.parse(localStorage.getItem(`folio.${key}`) || '[]');
   } catch {
     return [];
   }
@@ -53,15 +55,19 @@ function trimCanvas(src: HTMLCanvasElement, pad = 8): HTMLCanvasElement | null {
   return out;
 }
 
-export function SignatureDialog() {
+/** Fill & sign; with a target, signing a signature request's field. */
+export function SignatureDialog({ target }: { target?: StampTarget }) {
   const close = () => actions.set({ dialog: null });
+  const env = actions.get().envelope;
+  const signerName = (target && env && signerById(env, target.signer)?.name) || '';
+  const key = target?.initials ? 'initials' : 'signatures';
   const [mode, setMode] = useState<'draw' | 'type' | 'upload'>('draw');
   const [ink, setInk] = useState(INKS[0]);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(target?.initials ? initialsOf(signerName) : signerName);
   const [font, setFont] = useState(0);
   const [upload, setUpload] = useState<string | null>(null);
   const [remember, setRemember] = useState(true);
-  const [saved, setSaved] = useState<string[]>(loadSaved);
+  const [saved, setSaved] = useState<string[]>(() => loadSaved(key));
   const [hasInk, setHasInk] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
 
@@ -142,7 +148,8 @@ export function SignatureDialog() {
   };
 
   const place = (src: string, w: number, h: number) => {
-    placeImage(src, w, h, { signature: true });
+    if (target) stampField(target, src, w, h);
+    else placeImage(src, w, h, { signature: true });
     close();
   };
 
@@ -155,7 +162,7 @@ export function SignatureDialog() {
     const src = c.toDataURL('image/png');
     if (remember) {
       const next = [src, ...saved.filter((s) => s !== src)].slice(0, 6);
-      savePref('signatures', next);
+      savePref(key, next);
     }
     place(src, c.width, c.height);
   };
@@ -206,33 +213,35 @@ export function SignatureDialog() {
 
   return (
     <Modal
-      title="Fill & sign"
+      title={target ? (target.initials ? 'Add your initials' : `Sign as ${signerName}`) : 'Fill & sign'}
       onClose={close}
       width={560}
       footer={
         <>
-          <div className="quick-marks">
-            <Button variant="ghost" onClick={() => quickText(new Date().toLocaleDateString())}>
-              <Calendar size={15} /> Date
-            </Button>
-            <Button variant="ghost" onClick={() => quickMark('check')}>
-              <Check size={15} /> Check
-            </Button>
-            <Button variant="ghost" onClick={() => quickMark('cross')}>
-              <XIcon size={15} /> Cross
-            </Button>
-          </div>
+          {!target && (
+            <div className="quick-marks">
+              <Button variant="ghost" onClick={() => quickText(new Date().toLocaleDateString())}>
+                <Calendar size={15} /> Date
+              </Button>
+              <Button variant="ghost" onClick={() => quickMark('check')}>
+                <Check size={15} /> Check
+              </Button>
+              <Button variant="ghost" onClick={() => quickMark('cross')}>
+                <XIcon size={15} /> Cross
+              </Button>
+            </div>
+          )}
           <span className="spacer" />
           <Button onClick={close}>Cancel</Button>
           <Button variant="primary" onClick={create}>
-            Place signature
+            {target ? (target.initials ? 'Add initials' : 'Sign') : 'Place signature'}
           </Button>
         </>
       }
     >
       {saved.length > 0 && (
         <div className="saved-sigs">
-          <span className="field-label">Saved signatures</span>
+          <span className="field-label">{target?.initials ? 'Saved initials' : 'Saved signatures'}</span>
           <div className="saved-sig-row">
             {saved.map((s) => (
               <div key={s} className="saved-sig">
@@ -253,7 +262,7 @@ export function SignatureDialog() {
                   onClick={() => {
                     const next = saved.filter((x) => x !== s);
                     setSaved(next);
-                    savePref('signatures', next);
+                    savePref(key, next);
                   }}
                 >
                   <Trash2 size={12} />

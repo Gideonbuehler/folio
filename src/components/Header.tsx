@@ -33,11 +33,14 @@ import {
   ScanText,
   FileText,
   History,
+  Send,
+  ListChecks,
 } from 'lucide-react';
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
 import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, openRecent, printDocument, saveDocument } from '../lib/commands';
 import { compareWith } from '../lib/compare';
 import { startCertSign } from '../lib/certflow';
+import { openPrepare } from '../lib/prepare';
 import { clearRecent, useRecent, visibleRecent } from '../lib/recent';
 import { MOD } from '../lib/util';
 import { recognizeText, useOcr } from '../lib/ocr';
@@ -60,6 +63,7 @@ export function Header() {
     { label: 'Open…', icon: <FolderOpen size={I} />, shortcut: `${MOD}+O`, onClick: openPdf },
     { label: 'Combine files…', icon: <Files size={I} />, onClick: combinePdfs },
     { label: 'New blank document', icon: <FilePlus2 size={I} />, onClick: newBlankDocument },
+    { label: 'Signature requests…', icon: <ListChecks size={I} />, onClick: () => set({ dialog: { kind: 'requests' } }) },
     ...recentItems(),
     { separator: true },
     { label: 'Save', icon: <Save size={I} />, shortcut: `${MOD}+S`, disabled: !hasDoc, onClick: () => saveDocument() },
@@ -94,6 +98,7 @@ export function Header() {
       { separator: true },
       { heading: 'Stamp & sign' },
       { label: 'Fill & sign…', icon: <Signature size={I} />, onClick: () => set({ dialog: { kind: 'signature' } }) },
+      { label: 'Request signatures…', icon: <Send size={I} />, onClick: () => void openPrepare() },
       { label: 'Sign with certificate…', icon: <FileKey size={I} />, onClick: startCertSign },
       { label: 'Signatures…', icon: <ShieldCheck size={I} />, onClick: () => set({ dialog: { kind: 'signatures' } }) },
       { label: 'Watermark…', icon: <Stamp size={I} />, onClick: () => set({ dialog: { kind: 'watermark' } }) },

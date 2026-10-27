@@ -14,6 +14,7 @@ import {
   PDFStream,
   PDFObject,
   PDFObjectCopier,
+  PDFTextField,
   LineCapStyle,
   LineJoinStyle,
   PDFOperator,
@@ -56,8 +57,9 @@ import { settleGeometry } from './pdfjs';
 import { ocrKey, type OcrPage } from './ocrModel';
 import { addOcrText } from './ocrPdf';
 import { reduceDocument, type ReduceOptions, type ReduceStats } from './reduce';
-import { addFormFields, type FieldEntry } from './formfields';
+import { addFormFields, encodable, type FieldEntry } from './formfields';
 import { clearSignatures } from './certsign';
+import { signedAt, signerById, signingDate, STAMP_PREFIX, writeEnvelope, type Envelope, type EnvelopeField } from './envelope';
 
 export interface ExportInput {
   docs: Record<string, SourceDoc>;
@@ -66,6 +68,8 @@ export interface ExportInput {
   meta: DocMeta;
   /** Text recognized on scanned pages, by source page; saved as invisible text. */
   ocr?: Record<string, OcrPage>;
+  /** Signature request, written into the file with the names its fields got. */
+  envelope?: Envelope | null;
 }
 
 export interface ExportOptions {
@@ -87,6 +91,8 @@ export interface ExportResult {
   bytes: Uint8Array;
   warnings: string[];
   reduced?: ReduceStats;
+  /** The signature request as written, with the fields designed in this save included. */
+  envelope?: Envelope | null;
 }
 
 const REDACT_SCALE = 2.5; // ~180 dpi raster for redacted pages
@@ -209,6 +215,8 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
 
   /* 4. Draw objects and add annotations. */
   const fields: FieldEntry[] = [];
+  const env = input.envelope ?? null;
+  const stamped = new Set<string>();
   for (const [i, { item, page, m, raster }] of outPages.entries()) {
     const objs = byPage.get(item.id) ?? [];
     // Recognized text goes in first, so redaction and Edit-mode changes below
@@ -240,7 +248,15 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
       // Anything of ours that sits mostly under a redaction mark is left out too.
       if (hiddenByMarks(o, marks)) continue;
       if (o.type === 'field') {
-        fields.push({ o, page, m });
+        const who = o.signer && env ? signerById(env, o.signer) : undefined;
+        fields.push({ o, page, m, signer: who && { name: who.name || who.email, color: who.color } });
+        continue;
+      }
+      if (o.type === 'image' && o.stamp) {
+        // A signer's signature in a request field: a locked stamp, so the sender can merge it.
+        const who = env && signerById(env, o.stamp.signer);
+        await addStamp(out, page, m, o, res, who?.name || who?.email || o.author || 'Signer');
+        stamped.add(o.stamp.field);
         continue;
       }
       const isComment = o.type === 'highlight' || o.type === 'underline' || o.type === 'strike' || o.type === 'note';
@@ -256,10 +272,12 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
   }
 
   /* 5. Forms, bookmarks, metadata. */
+  let names = new Map<string, string>();
+  let envelope: Envelope | null = null;
   if (opts.flattenForms) {
     try {
       rebuildAcroForm(out, outPages.map((p) => p.page), libDocs);
-      addFormFields(out, fields, warnings);
+      names = addFormFields(out, fields, warnings);
       out.getForm().flatten();
     } catch (e) {
       console.warn(e);
@@ -267,7 +285,16 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     }
   } else {
     rebuildAcroForm(out, outPages.map((p) => p.page), libDocs);
-    addFormFields(out, fields, warnings);
+    names = addFormFields(out, fields, warnings);
+  }
+  if (env) {
+    envelope = envelopeAsWritten(env, fields, names);
+    try {
+      if (!opts.flattenForms) applyEnvelope(out, envelope, stamped, warnings);
+    } catch (e) {
+      console.warn('Signature request fields not updated', e);
+    }
+    writeEnvelope(out, envelope);
   }
   try {
     // Signatures cover the original bytes; a rewritten file can't keep them.
@@ -307,7 +334,82 @@ export async function buildPdf(input: ExportInput, opts: ExportOptions = {}): Pr
     });
   }
   const bytes = await out.save({ useObjectStreams: opts.objectStreams ?? true });
-  return { bytes, warnings: [...warnings], reduced };
+  return { bytes, warnings: [...warnings], reduced, envelope };
+}
+
+/* ------------------------------------------------------------------ */
+/* Signature requests                                                   */
+/* ------------------------------------------------------------------ */
+
+/** The envelope with the request fields designed in this save added under their names in the file. */
+function envelopeAsWritten(env: Envelope, fields: FieldEntry[], names: Map<string, string>): Envelope {
+  const designed: EnvelopeField[] = [];
+  for (const { o } of fields) {
+    const name = names.get(o.id);
+    if (!o.signer || !name || designed.some((f) => f.name === name)) continue;
+    const role = o.role ?? (o.kind === 'signature' ? 'signature' : o.kind === 'checkbox' ? 'checkbox' : 'text');
+    designed.push({ name, signer: o.signer, role, required: !!o.required });
+  }
+  const taken = new Set(designed.map((f) => f.name));
+  return { ...env, fields: [...env.fields.filter((f) => !taken.has(f.name)), ...designed] };
+}
+
+/**
+ * Brings the request's fields up to date: a signed signature field gives way
+ * to its stamp, and once a signer has finished, their date and name fields
+ * are filled in and all their fields locked.
+ */
+function applyEnvelope(out: PDFDocument, env: Envelope, stamped: Set<string>, warnings: Set<string>) {
+  const form = out.getForm();
+  const font = form.getDefaultFont();
+  for (const f of env.fields) {
+    const field = form.getFieldMaybe(f.name);
+    if (!field) continue;
+    if (stamped.has(f.name) && (f.role === 'signature' || f.role === 'initials')) {
+      form.removeField(field);
+      continue;
+    }
+    const at = signedAt(env, f.signer);
+    if (at === undefined) continue;
+    if (field instanceof PDFTextField && !field.getText()) {
+      const who = signerById(env, f.signer);
+      if (f.role === 'date') field.setText(signingDate(at));
+      else if (f.role === 'name' && who) field.setText(encodable(font, who.name, warnings));
+    }
+    field.enableReadOnly();
+  }
+}
+
+/** A signature or initials placed in a request field, as a locked stamp annotation. */
+async function addStamp(doc: PDFDocument, page: PDFPage, m: Matrix, o: ImageObj, res: Resources, signer: string) {
+  const ctx = doc.context;
+  const inv = invertMatrix(m);
+  const pts = [applyMatrix(inv, o.x, o.y), applyMatrix(inv, o.x + o.w, o.y), applyMatrix(inv, o.x + o.w, o.y + o.h), applyMatrix(inv, o.x, o.y + o.h)];
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  const img = await res.image(o.src);
+  // The appearance's own space is user space (its box is the annotation's
+  // rectangle), so the image goes where it is on the page, upright as shown.
+  const ap = ctx.formXObject(
+    [concatTransformationMatrix(...inv), concatTransformationMatrix(o.w, 0, 0, -o.h, o.x, o.y + o.h), drawObject('Im0')],
+    { BBox: bbox, Resources: { XObject: { Im0: img.ref } } },
+  );
+  const dict = ctx.obj({
+    Type: 'Annot',
+    Subtype: 'Stamp',
+    Rect: bbox,
+    // Print, read-only, locked, locked contents.
+    F: 4 | 64 | 128 | 512,
+    P: page.ref,
+    NM: PDFHexString.fromText(`${STAMP_PREFIX}${o.stamp!.field}`),
+    T: PDFHexString.fromText(signer),
+    Contents: PDFHexString.fromText(`Signed by ${signer}`),
+    M: PDFString.fromDate(new Date()),
+    CreationDate: PDFString.fromDate(new Date(o.created)),
+    AP: { N: ctx.register(ap) },
+  });
+  page.node.addAnnot(ctx.register(dict));
 }
 
 export async function loadLib(bytes: Uint8Array, password?: string) {

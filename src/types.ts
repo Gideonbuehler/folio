@@ -1,4 +1,5 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { SignRole } from './lib/envelope';
 
 /** Affine matrix [a, b, c, d, e, f] in the PDF convention. */
 export type Matrix = [number, number, number, number, number, number];
@@ -141,6 +142,8 @@ export interface ImageObj extends Base {
   crop?: { l: number; t: number; r: number; b: number };
   /** Background painted over the original image's spot in the editor. */
   cover?: Rect & { color: string };
+  /** A signer's signature or initials in a signature request's field (saved as a locked stamp). */
+  stamp?: { field: string; signer: string };
 }
 
 export interface FillObj extends Base {
@@ -180,6 +183,9 @@ export interface FieldObj extends Base {
   options?: string[];
   /** Text size in points; 0 fits the text to the field. */
   fontSize: number;
+  /** Signature requests: the signer who fills this field in, and what it's for. */
+  signer?: string;
+  role?: SignRole;
 }
 
 export type Obj = BoxObj | LineObj | InkObj | TextObj | MarkupObj | NoteObj | ImageObj | FillObj | FieldObj;
@@ -245,7 +251,7 @@ export interface ToolStyle {
 }
 
 export type Dialog =
-  | { kind: 'signature' }
+  | { kind: 'signature'; target?: StampTarget }
   | { kind: 'watermark' }
   | { kind: 'pageNumbers' }
   | { kind: 'properties' }
@@ -256,4 +262,16 @@ export type Dialog =
   | { kind: 'certSign' }
   | { kind: 'signatures' }
   | { kind: 'shortcuts' }
-  | { kind: 'unsaved'; name: string; resolve: (choice: 'save' | 'discard' | 'cancel') => void };
+  | { kind: 'unsaved'; name: string; resolve: (choice: 'save' | 'discard' | 'cancel') => void }
+  | { kind: 'sendRequest' }
+  | { kind: 'requests' }
+  | { kind: 'decline' };
+
+/** A signature request field being signed: where the signature or initials go. */
+export interface StampTarget {
+  field: string;
+  signer: string;
+  page: string;
+  rect: Rect;
+  initials: boolean;
+}

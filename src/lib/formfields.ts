@@ -3,7 +3,11 @@
  * appearance streams (pdf-lib's form API), so any reader can fill them.
  */
 import {
+  beginText,
   degrees,
+  endText,
+  fill,
+  moveText,
   PDFCheckBox,
   PDFDocument,
   PDFDropdown,
@@ -14,16 +18,28 @@ import {
   PDFPage,
   PDFRadioGroup,
   PDFTextField,
+  rectangle,
   rgb,
+  setFillingRgbColor,
+  setFontAndSize,
+  setLineWidth,
+  setStrokingRgbColor,
+  showText,
+  StandardFonts,
+  stroke,
+  type PDFOperator,
 } from '@cantoo/pdf-lib';
 import type { FieldKind, FieldObj, Matrix, Rect } from '../types';
 import { applyMatrix, invertMatrix } from './geometry';
+import { hexToRgb } from './util';
 
 export interface FieldEntry {
   o: FieldObj;
   page: PDFPage;
   /** PDF user space -> page space for this page. */
   m: Matrix;
+  /** Signature requests: the signer's name and color, shown on the field. */
+  signer?: { name: string; color: string };
 }
 
 const BORDER = rgb(0.55, 0.58, 0.63);
@@ -50,6 +66,7 @@ function userRect(r: Rect, m: Matrix) {
  * (pdf-lib grows the box by the border width and anchors rotated boxes at a corner.)
  */
 function placement(e: FieldEntry) {
+  const color = e.signer ? rgb(...hexToRgb(e.signer.color)) : BORDER;
   const R = userRect(e.o, e.m);
   const rot = rotationOf(e.m);
   const b = BORDER_WIDTH / 2;
@@ -61,7 +78,7 @@ function placement(e: FieldEntry) {
     width: Math.max(1, upright.width),
     height: Math.max(1, upright.height),
     rotate: degrees(rot),
-    borderColor: BORDER,
+    borderColor: color,
     borderWidth: BORDER_WIDTH,
     backgroundColor: rgb(1, 1, 1),
     textColor: rgb(0, 0, 0),
@@ -69,7 +86,7 @@ function placement(e: FieldEntry) {
 }
 
 /** Text the form's font (Helvetica) can show; anything else becomes "?". */
-function encodable(font: PDFFont, text: string, warnings: Set<string>) {
+export function encodable(font: PDFFont, text: string, warnings: Set<string>) {
   try {
     font.encodeText(text);
     return text;
@@ -96,9 +113,13 @@ function setCommon(field: PDFField, o: FieldObj) {
   if (o.required) field.enableRequired();
 }
 
-/** Adds the designed fields to the output document's AcroForm. */
-export function addFormFields(doc: PDFDocument, entries: FieldEntry[], warnings: Set<string>) {
-  if (!entries.length) return;
+/**
+ * Adds the designed fields to the output document's AcroForm. Returns each
+ * field object's name in the file (names already in use get a suffix).
+ */
+export function addFormFields(doc: PDFDocument, entries: FieldEntry[], warnings: Set<string>): Map<string, string> {
+  const names = new Map<string, string>();
+  if (!entries.length) return names;
   const form = doc.getForm();
   const font = form.getDefaultFont();
   const taken = new Set(form.getFields().map((f) => f.getName()));
@@ -126,6 +147,7 @@ export function addFormFields(doc: PDFDocument, entries: FieldEntry[], warnings:
     const list = groups.get(key);
     if (list) list.push(e);
     else groups.set(key, [e]);
+    names.set(e.o.id, name);
   }
   if (renamed.size) warnings.add(`Form fields with names already in use were renamed (${[...renamed].join(', ')}).`);
 
@@ -137,8 +159,10 @@ export function addFormFields(doc: PDFDocument, entries: FieldEntry[], warnings:
     } catch (e) {
       console.warn('Form field not written', e);
       warnings.add(`The form field "${name}" could not be created.`);
+      for (const e of list) names.delete(e.o.id);
     }
   }
+  return names;
 }
 
 function writeField(doc: PDFDocument, form: ReturnType<PDFDocument['getForm']>, font: PDFFont, name: string, kind: FieldKind, list: FieldEntry[], warnings: Set<string>) {
@@ -211,7 +235,7 @@ function writeField(doc: PDFDocument, form: ReturnType<PDFDocument['getForm']>, 
       const e = list[0];
       const ctx = doc.context;
       const R = userRect(e.o, e.m);
-      const ap = ctx.formXObject([], { BBox: [0, 0, R.w, R.h] });
+      const ap = e.signer ? signHereAppearance(doc, R, rotationOf(e.m), e, warnings) : ctx.formXObject([], { BBox: [0, 0, R.w, R.h] });
       const widget = ctx.obj({
         Type: 'Annot',
         Subtype: 'Widget',
@@ -232,4 +256,37 @@ function writeField(doc: PDFDocument, form: ReturnType<PDFDocument['getForm']>, 
     }
   }
   setCommon(field, first);
+}
+
+/**
+ * What an empty signature field of a signature request looks like in any
+ * reader: a tinted box in the signer's color saying who signs there. The
+ * content is turned so it reads upright on rotated pages.
+ */
+function signHereAppearance(doc: PDFDocument, R: Rect, rot: number, e: FieldEntry, warnings: Set<string>) {
+  const ctx = doc.context;
+  const font = doc.embedStandardFont(StandardFonts.Helvetica);
+  const [r, g, b] = hexToRgb(e.signer!.color);
+  const tint = (c: number) => 1 - 0.1 * (1 - c);
+  const [W, H] = rot % 180 === 0 ? [R.w, R.h] : [R.h, R.w];
+  const what = e.o.role === 'initials' ? 'Initials' : 'Sign here';
+  const size = Math.max(4, Math.min(9, H * 0.3, (W - 6) / Math.max(1, (what.length + e.signer!.name.length + 3) * 0.5)));
+  const label = encodable(font, `${what}: ${e.signer!.name}`, warnings);
+  const ops: PDFOperator[] = [
+    setFillingRgbColor(tint(r), tint(g), tint(b)),
+    rectangle(0, 0, W, H),
+    fill(),
+    setStrokingRgbColor(r, g, b),
+    setLineWidth(1),
+    rectangle(0.5, 0.5, Math.max(0, W - 1), Math.max(0, H - 1)),
+    stroke(),
+    setFillingRgbColor(r * 0.8, g * 0.8, b * 0.8),
+    beginText(),
+    setFontAndSize('F0', size),
+    moveText(3, Math.max(2, H - size - 2)),
+    showText(font.encodeText(label)),
+    endText(),
+  ];
+  const matrix = rot === 90 ? [0, 1, -1, 0, 0, 0] : rot === 180 ? [-1, 0, 0, -1, 0, 0] : rot === 270 ? [0, -1, 1, 0, 0, 0] : [1, 0, 0, 1, 0, 0];
+  return ctx.formXObject(ops, { BBox: [0, 0, W, H], Matrix: matrix, Resources: { Font: { F0: font.ref } } });
 }

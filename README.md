@@ -89,6 +89,36 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   real AcroForm fields with appearances, fillable in any reader; "Make fields
   fillable now" does the same in place so you can fill them in Folio straight
   away (Undo turns them back into editable designs).
+- Request signatures (Tools menu): add signers (name and email, in order or
+  all at once), pick a signer and place their fields: signature, initials,
+  date signed, name, text and check boxes, each tinted in the signer's color.
+  "Send for signature" writes the fields and the request into a copy and opens
+  an email to the first signer with the copy attached. Folio never sends mail
+  itself and nothing is uploaded: the desktop app hands the message to a mail
+  program that takes attachments (Simple MAPI: classic Outlook, Thunderbird),
+  and otherwise saves the copy, shows it in its folder and opens a mailto:
+  link; the browser uses the share sheet, or a download and a mailto: link.
+  - Signers who open the PDF in Folio see whose turn it is, click "Start
+    signing" and are taken through their fields: signature and initials
+    fields open the signature dialog and take the signature in place, date
+    and name fill in by themselves, everyone else's fields are locked. Finish
+    saves the signed copy and opens the email to the next signer (with the
+    sender in copy), or back to the sender. They can also decline, with a
+    reason. Without Folio, the fields work in any reader that fills forms.
+  - The sender's Folio keeps a copy of what it sent and a fingerprint of every
+    page. Opening a signed copy that comes back adds its signatures to that
+    copy (so copies signed in parallel are combined) and says if any page
+    differs from what was sent. File > Signature requests lists every request
+    with who has signed, with Remind and Open. When everyone has signed,
+    Finalize flattens the signatures and fields into the pages, adds a
+    signing summary page (signers, times, history, what was checked and the
+    SHA-256 of the copy sent) and saves the signed document, ready to email
+    to the signers.
+  - The request travels inside the PDF as a custom entry in the document
+    information dictionary; signatures are locked stamp annotations named
+    after their field until the sender finalizes. Signers are identified by
+    the address the email went to; for proof against later changes, sign the
+    finished document with a certificate.
 - Compare (Tools > Compare with…): pick another version of the document to
   see the two side by side (scrolling together) or overlaid (what only the old
   version has in red, what only the new one has in blue). Pages are paired by
@@ -190,6 +220,11 @@ them together (here `eng+deu`). Language codes are listed in
 - `src/lib/certsign.ts`: incremental signing and signature checks;
   `src/lib/certs.ts` digital IDs and CMS (node-forge opens the .pfx/.p12,
   Web Crypto signs and verifies), `src/lib/der.ts` the DER they need
+- `src/lib/envelope.ts`: the signature request carried in the PDF;
+  `src/lib/prepare.ts` signers and their fields, `src/lib/signing.ts` guided
+  signing, `src/lib/requests.ts` the sender's copies, merging and finalizing,
+  `src/lib/mail.ts` handing messages to the mail program (Simple MAPI in
+  `src-tauri/src/lib.rs`)
 - `src/lib/formfields.ts`: writes designed form fields as AcroForm fields;
   `src/lib/forms.ts` names them and makes them fillable in place
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)

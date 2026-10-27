@@ -8,6 +8,7 @@ import { readFileBytes, uid } from './lib/util';
 import { forgetLiveSources } from './lib/live';
 import { isPathRef, type FileRef, type Picked } from './lib/files';
 import { ocrKey, type OcrPage } from './lib/ocrModel';
+import { envelopeFromInfo, type Envelope } from './lib/envelope';
 
 interface Snapshot {
   pages: PageItem[];
@@ -15,6 +16,8 @@ interface Snapshot {
   meta: DocMeta;
   /** Text recognized on scanned pages, by source page (see ocrKey). */
   ocr: Record<string, OcrPage>;
+  /** The document's signature request, if it has one (see lib/envelope). */
+  envelope: Envelope | null;
 }
 
 export interface SearchPart {
@@ -76,6 +79,8 @@ interface State extends Snapshot {
   dialog: Dialog | null;
   theme: Theme;
   userName: string;
+  /** Where signers send documents back to. */
+  userEmail: string;
   style: ToolStyle;
   toasts: Toast[];
   search: { query: string; matchCase: boolean; hits: SearchHit[]; active: number; running: boolean };
@@ -148,6 +153,7 @@ export const useStore = create<State>()(() => ({
   objects: [],
   meta: EMPTY_META,
   ocr: {},
+  envelope: null,
   fileName: '',
   fileHandle: null,
   dirty: false,
@@ -171,6 +177,7 @@ export const useStore = create<State>()(() => ({
   dialog: null,
   theme: loadTheme(),
   userName: loadString('userName', 'Me'),
+  userEmail: loadString('userEmail', ''),
   style: loadPref('style', DEFAULT_STYLE),
   toasts: [],
   search: { query: '', matchCase: false, hits: [], active: -1, running: false },
@@ -179,7 +186,7 @@ export const useStore = create<State>()(() => ({
 const get = useStore.getState;
 const set = useStore.setState;
 
-const snap = (s: Snapshot): Snapshot => ({ pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr });
+const snap = (s: Snapshot): Snapshot => ({ pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr, envelope: s.envelope ?? null });
 
 /* ------------------------------------------------------------------ */
 /* History                                                             */
@@ -403,6 +410,11 @@ export function setUserName(userName: string) {
   savePref('userName', userName);
 }
 
+export function setUserEmail(userEmail: string) {
+  set({ userEmail });
+  savePref('userEmail', userEmail);
+}
+
 export function setTheme(theme: Theme) {
   set({ theme });
   savePref('theme', theme);
@@ -465,6 +477,9 @@ export function openSource(bytes: Uint8Array, name: string) {
   return loadSource(bytes, name, askPassword(name));
 }
 
+/** Told when a document with a signature request is opened (the sender's Folio tracks returned copies). */
+export const envelopeOpened = new Set<(tab: string, env: Envelope, doc: SourceDoc) => void>();
+
 /** Opens the files as one document (several are combined) in a new tab. Returns the tab's id. */
 export async function openDocuments(picked: Picked[]): Promise<string | null> {
   const pdfs = picked.filter((p) => /pdf$/i.test(p.file.type) || /\.pdf$/i.test(p.file.name));
@@ -490,12 +505,16 @@ export async function openDocuments(picked: Picked[]): Promise<string | null> {
         subject: str(info?.Subject),
         keywords: str(info?.Keywords),
       },
+      // A signature request belongs to its one file; combining files starts over.
+      envelope: pdfs.length === 1 ? envelopeFromInfo(info) : null,
       fileName: pdfs.length > 1 ? 'Combined.pdf' : first.name,
       fileHandle: pdfs.length === 1 ? pdfs[0].handle : null,
       dirty: pdfs.length > 1,
     });
     for (const l of loaded) void measureGuessed(l.doc, (changed) => applyGeometry(l.doc.id, changed));
     set({ tool: 'select' });
+    const env = get().envelope;
+    if (env) for (const fn of envelopeOpened) fn(id, env, first);
     return id;
   } catch (e) {
     if (!(e instanceof PasswordCancelled)) {
@@ -872,6 +891,7 @@ function freshDoc(): DocState {
     objects: [],
     meta: EMPTY_META,
     ocr: {},
+    envelope: null,
     fileName: '',
     fileHandle: null,
     dirty: false,

@@ -42,6 +42,9 @@ import { TooltipLayer } from './components/Tooltip';
 import { OcrProgress } from './components/Ocr';
 import { CompareView } from './components/CompareView';
 import { SignatureBar } from './components/CertSign';
+import { RequestPanel } from './components/RequestPanel';
+import { SigningBar } from './components/SigningBar';
+import { loadRequests } from './lib/requests';
 import { useCompare } from './lib/compare';
 
 const { get, set } = actions;
@@ -93,7 +96,9 @@ export function App() {
             <Fragment key={tab}>
               <Sidebar />
               <Viewer />
+              <RequestPanel />
               <SignatureBar />
+              <SigningBar />
             </Fragment>
           )
         ) : (
@@ -132,6 +137,7 @@ function useSession() {
   useEffect(() => {
     void startRecovery();
     startRecent();
+    void loadRequests();
   }, []);
 }
 

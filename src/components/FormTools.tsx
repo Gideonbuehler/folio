@@ -3,6 +3,7 @@ import { Asterisk, ChevronDown, CircleDot, FileSignature, FormInput, Settings2, 
 import { FIELD_TOOLS, type FieldKind, type FieldObj, type FieldTool, type Rect } from '../types';
 import { actions, setTool, updateObjects, useStore } from '../store';
 import { makeFieldsFillable, primeFieldNames } from '../lib/forms';
+import { assignedSize } from '../lib/prepare';
 import { IconButton, Popover, usePopover } from './ui';
 import { FIELD_LABEL } from './labels';
 
@@ -23,7 +24,7 @@ export const isFieldTool = (t: string): t is FieldTool => t in FIELD_TOOLS;
 
 /** Size of a field placed with a click instead of a drag. */
 export function defaultFieldRect(kind: FieldKind, at: { x: number; y: number }): Rect {
-  const [w, h] = { text: [150, 22], multiline: [200, 60], checkbox: [14, 14], radio: [14, 14], dropdown: [130, 22], signature: [180, 46] }[kind];
+  const [w, h] = assignedSize() ?? { text: [150, 22], multiline: [200, 60], checkbox: [14, 14], radio: [14, 14], dropdown: [130, 22], signature: [180, 46] }[kind];
   return { x: at.x - w / 2, y: at.y - h / 2, w, h };
 }
 
