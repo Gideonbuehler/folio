@@ -46,12 +46,14 @@ export function SigningBar() {
   const tab = useStore((s) => s.activeTab);
   const list = useRequests((s) => s.list);
   if (!env || env.status === 'draft' || !tab) return null;
-  const tracked = list.some((r) => r.id === env.id);
-  if (env.status === 'completed') return <CompletedBar env={env} tab={tab} tracked={tracked} />;
+  const record = list.find((r) => r.id === env.id);
+  const tracked = !!record;
+  if (env.status === 'completed' || record?.envelope.status === 'completed')
+    return <CompletedBar env={record?.envelope ?? env} tab={tab} tracked={tracked && record?.via !== 'documenso'} remote={record?.via === 'folio-sign'} />;
   return <OutBar env={env} tab={tab} tracked={tracked} />;
 }
 
-function CompletedBar({ env, tab, tracked }: { env: Envelope; tab: string; tracked: boolean }) {
+function CompletedBar({ env, tab, tracked, remote }: { env: Envelope; tab: string; tracked: boolean; remote: boolean }) {
   const done = env.events.find((e) => e.type === 'completed');
   return (
     <div className="signing-bar tone-done" role="status">
@@ -62,7 +64,7 @@ function CompletedBar({ env, tab, tracked }: { env: Envelope; tab: string; track
       </span>
       {tracked && (
         <button type="button" className="sig-bar-btn" onClick={() => void sendFinal(tab)}>
-          <Mail size={14} /> Email to signers
+          <Mail size={14} /> {remote ? 'Send to signers' : 'Email to signers'}
         </button>
       )}
     </div>
@@ -139,7 +141,7 @@ function OutBar({ env, tab, tracked }: { env: Envelope; tab: string; tracked: bo
           {left.length ? `Waiting for ${signersUp(latest).map((s) => s.name).join(', ')}` : 'Everyone has signed'}
           {report?.changedPages.length ? <em> · differs from what you sent on page {report.changedPages.join(', ')}</em> : ''}
         </span>
-        {!left.length && r && (
+        {!left.length && r && r.via !== 'documenso' && (
           <button type="button" className="sig-bar-btn primary" onClick={() => void finalizeRequest(r.id)}>
             Finalize…
           </button>

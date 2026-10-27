@@ -119,6 +119,22 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
     after their field until the sender finalizes. Signers are identified by
     the address the email went to; for proof against later changes, sign the
     finished document with a certificate.
+  - Instead of your own email, a request can go out through a signing service
+    (File > Signing services, then pick it in the send dialog):
+    - Folio Sign, the signing server in `server/` (see below), emails each
+      signer a personal link when it's their turn. The link opens Folio in the
+      browser with just that document and the signing bar; finishing uploads
+      the signed copy. The server records when each link was opened and
+      signed and from which address. Folio collects the signed copies on
+      start and from Signature requests (Check for updates), merges and checks
+      them as above, and after finalizing, "Send to signers" has the server
+      email everyone the finished document.
+    - Documenso (documenso.com or self-hosted, with an API token): the
+      document and the signers' fields go to Documenso's v2 API, which emails
+      the signers, collects the signatures and seals the document. Folio shows
+      its progress, reminds through it, and keeps the signed document it
+      returns. The browser may block calls to it; the desktop app makes them
+      through Tauri's HTTP plugin.
 - Compare (Tools > Compare with…): pick another version of the document to
   see the two side by side (scrolling together) or overlaid (what only the old
   version has in red, what only the new one has in blue). Pages are paired by
@@ -169,6 +185,56 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   IndexedDB in the browser). If Folio crashes or is killed, the next start
   offers to restore them. Saving, closing a document or closing the window
   removes its copy. Nothing is sent anywhere.
+
+## Folio Sign (signing server)
+
+`server/` is a small self-hosted signing service for Folio: Node 22.18 or
+newer, no database (requests are JSON files and PDFs in a data folder), and
+SMTP for mail. It serves Folio's built web app as the signing page.
+
+```bash
+npm run build
+```
+
+```bash
+cd server
+```
+
+```bash
+npm install
+```
+
+```bash
+npm run new-key
+```
+
+Put the settings in `server/.env` (or the environment):
+
+```
+FOLIO_SIGN_KEYS=alice=<the key from new-key>,bob=<another key>
+FOLIO_SIGN_PUBLIC_URL=https://sign.example.com
+SMTP_URL=smtps://user:password@smtp.example.com:465
+MAIL_FROM="Folio Sign <sign@example.com>"
+```
+
+```bash
+npm start
+```
+
+Each sender enters the server address and their key in File > Signing
+services. Without `SMTP_URL`, mail is written to `server/data/outbox` as .eml
+files, which is how to try it locally: in development, run the server, set
+`FOLIO_SIGN_PUBLIC_URL=http://localhost:5180` so links open the Vite dev server
+(which forwards `/api` to the server on port 8787), and use
+`http://127.0.0.1:8787` as the address in Folio. Other settings
+(`FOLIO_SIGN_PORT`, `FOLIO_SIGN_HOST`, `FOLIO_SIGN_DATA`, `FOLIO_SIGN_WEB`,
+`FOLIO_SIGN_MAX_MB`) are described in `server/src/config.ts`.
+
+For real use, run it behind HTTPS (a reverse proxy such as Caddy or nginx in
+front of port 8787, which also sets `X-Forwarded-For` so the audit trail gets
+signers' addresses) and back up the data folder. Signing links are long random
+tokens; anyone with a link can sign as that signer, which is the same trust a
+signing email gives.
 
 ## OCR languages
 
@@ -225,6 +291,12 @@ them together (here `eng+deu`). Language codes are listed in
   signing, `src/lib/requests.ts` the sender's copies, merging and finalizing,
   `src/lib/mail.ts` handing messages to the mail program (Simple MAPI in
   `src-tauri/src/lib.rs`)
+- `src/lib/services.ts`: the signing services and their settings;
+  `src/lib/foliosign.ts` the Folio Sign API, `src/lib/linksign.ts` and
+  `src/components/LinkSigning.tsx` signing from a link, `src/lib/documenso.ts`
+  the Documenso API
+- `server/`: Folio Sign (`src/main.ts` routes, `src/store.ts` requests on disk,
+  `src/mail.ts` SMTP or the outbox folder)
 - `src/lib/formfields.ts`: writes designed form fields as AcroForm fields;
   `src/lib/forms.ts` names them and makes them fillable in place
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)

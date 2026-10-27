@@ -1,0 +1,24 @@
+{
+  "name": "folio-sign",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted signing service for Folio: signing links by email, an audit trail, and Folio's web app as the signing page.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "dev": "node --watch src/main.ts",
+    "new-key": "node src/main.ts new-key",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "nodemailer": "^7.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/nodemailer": "^7.0.4",
+    "typescript": "~5.9.3"
+  }
+}

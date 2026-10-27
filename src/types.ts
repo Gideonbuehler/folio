@@ -265,7 +265,8 @@ export type Dialog =
   | { kind: 'unsaved'; name: string; resolve: (choice: 'save' | 'discard' | 'cancel') => void }
   | { kind: 'sendRequest' }
   | { kind: 'requests' }
-  | { kind: 'decline' };
+  | { kind: 'decline' }
+  | { kind: 'services'; back?: boolean };
 
 /** A signature request field being signed: where the signature or initials go. */
 export interface StampTarget {

@@ -21,7 +21,12 @@ function dropDevSamples(): Plugin {
 export default defineConfig({
   plugins: [react(), dropDevSamples()],
   // The desktop shell (src-tauri) loads the dev server from this exact port.
-  server: { port: 5180, strictPort: true },
+  server: {
+    port: 5180,
+    strictPort: true,
+    // Folio Sign (server/) in development: signing links open this dev server.
+    proxy: { '/api': 'http://127.0.0.1:8787' },
+  },
   clearScreen: false,
   build: { target: 'es2022', chunkSizeWarningLimit: 4000 },
   optimizeDeps: { exclude: ['pdfjs-dist'] },

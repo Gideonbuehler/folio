@@ -1,0 +1,4 @@
+node_modules/
+# Documents, signatures and sent mail of a running server
+data/
+.env

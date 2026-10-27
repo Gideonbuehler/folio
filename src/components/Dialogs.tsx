@@ -15,6 +15,7 @@ import { CertSignDialog, SignaturesDialog } from './CertSign';
 import { UnsavedDialog } from './SessionDialogs';
 import { RequestsDialog, SendRequestDialog } from './RequestPanel';
 import { DeclineDialog } from './SigningBar';
+import { ServicesDialog } from './ServicesDialog';
 
 const close = () => actions.set({ dialog: null });
 
@@ -55,6 +56,8 @@ export function DialogHost() {
       return <RequestsDialog />;
     case 'decline':
       return <DeclineDialog />;
+    case 'services':
+      return <ServicesDialog back={dialog.back} />;
   }
 }
 

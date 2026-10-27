@@ -1,12 +1,15 @@
 /**
- * The sender's side of signature requests sent by email.
+ * The sender's side of signature requests, sent by email, through a Folio
+ * Sign server or through Documenso.
  *
  * Sending keeps a private copy of what was sent (the "master") together with
- * a fingerprint of every page. When a signed copy comes back and is opened
- * in Folio, the signatures and fields of whoever signed it are merged into
- * the master, and its pages are compared with what was sent, so changes
- * outside the signers' fields don't go unnoticed. Once everyone has signed,
- * finalizing flattens the master and adds a signing summary page.
+ * a fingerprint of every page. When a signed copy comes back (opened in
+ * Folio, or fetched from Folio Sign), the signatures and fields of whoever
+ * signed it are merged into the master, and its pages are compared with what
+ * was sent, so changes outside the signers' fields don't go unnoticed. Once
+ * everyone has signed, finalizing flattens the master and adds a signing
+ * summary page. Documenso collects and seals the signatures itself; Folio
+ * follows its status and keeps the signed document it returns.
  */
 import { create } from 'zustand';
 import {
@@ -39,6 +42,7 @@ import {
   signedAt,
   signerById,
   signersUp,
+  readEnvelope,
   STAMP_PREFIX,
   when,
   writeEnvelope,
@@ -52,6 +56,10 @@ import { dataRead, dataRemove, dataWrite, isDesktop } from './native';
 import { loadSource } from './pdfjs';
 import { saveBytes } from './files';
 import { baseName } from './util';
+import { pageToDisplay, displaySize } from './geometry';
+import { useServices, type SendVia } from './services';
+import { cancelRemote, createRemote, finalRemote, getRemote, remindRemote, remoteCopy, type RemoteAudit } from './foliosign';
+import { documensoRemind, documensoSigned, documensoStatus, sendDocumenso, type DocumensoField } from './documenso';
 
 const { get, set } = actions;
 
@@ -68,6 +76,14 @@ export interface TrackedRequest {
   sentHash: string;
   /** Pages (1-based) that differed from the sent copy, in the copy each signer returned. */
   changes: Record<string, number[]>;
+  /** How it was sent (email when missing). */
+  via?: SendVia;
+  /** The request's id with the signing service. */
+  remote?: string;
+  /** Folio Sign: the returned copies already merged. */
+  merged?: number[];
+  /** Folio Sign: when signers opened their links, from where. */
+  audit?: RemoteAudit[];
 }
 
 /** What opening a returned copy found, shown above that document. */
@@ -130,7 +146,13 @@ async function writeMaster(id: string, bytes: Uint8Array) {
 
 export const findRequest = (id: string | undefined) => (id ? useRequests.getState().list.find((r) => r.id === id) : undefined);
 
+/** Removes a request from the list; one still out with Folio Sign is cancelled there too (its links stop working). */
 export function forgetRequest(id: string) {
+  const r = findRequest(id);
+  const fs = useServices.getState().folioSign;
+  if (r?.via === 'folio-sign' && r.remote && fs && r.envelope.status === 'out') {
+    cancelRemote(fs, r.remote).catch((e) => console.warn('Could not cancel the request on Folio Sign', e));
+  }
   return serial(async () => {
     await writeIndex(useRequests.getState().list.filter((r) => r.id !== id));
     if (isDesktop) await dataRemove(masterKey(id)).catch(() => {});
@@ -203,11 +225,16 @@ export function requestBody(env: Envelope, to: Signer, from: { name: string; ema
  * the request into a copy, keeps that copy as the master, shows it in the
  * tab and opens an email to whoever signs first.
  */
-export async function sendForSignature(): Promise<boolean> {
+export async function sendForSignature(via: SendVia = 'email'): Promise<boolean> {
   await ensureLoaded();
   const s = get();
   const tab = s.activeTab;
   if (!s.envelope || s.busy || !tab) return false;
+  const services = useServices.getState();
+  if ((via === 'folio-sign' && !services.folioSign) || (via === 'documenso' && !services.documenso)) {
+    toast('Set up the signing service first (File > Signing services)', 'error');
+    return false;
+  }
   const now = Date.now();
   const env: Envelope = {
     ...s.envelope,
@@ -222,13 +249,21 @@ export async function sendForSignature(): Promise<boolean> {
   let bytes: Uint8Array;
   try {
     const { buildPdf } = await import('./export');
-    const res = await buildPdf(
-      { docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr, envelope: env },
-      { onProgress: (t) => set({ busy: t }) },
-    );
+    // Documenso places its own fields: the signers' fields go to it as positions instead.
+    const forDocumenso = via === 'documenso';
+    const objects = forDocumenso ? s.objects.filter((o) => !(o.type === 'field' && o.signer)) : s.objects;
+    const res = await buildPdf({ docs: s.docs, pages: s.pages, objects, meta: s.meta, ocr: s.ocr, envelope: env }, { onProgress: (t) => set({ busy: t }) });
     bytes = res.bytes;
     sent = res.envelope ?? env;
     for (const w of res.warnings) toast(w, 'info');
+    let remote: string | undefined;
+    if (via === 'folio-sign') {
+      set({ busy: 'Sending to Folio Sign…' });
+      remote = (await createRemote(services.folioSign!, sent, bytes)).id;
+    } else if (forDocumenso) {
+      set({ busy: 'Sending to Documenso…' });
+      remote = await sendDocumenso(services.documenso!, sent, bytes, await documensoFields(sent));
+    }
     const lib = await loadLib(bytes);
     const record: TrackedRequest = {
       id: sent.id,
@@ -239,6 +274,9 @@ export async function sendForSignature(): Promise<boolean> {
       baseline: await pageHashes(lib),
       sentHash: await sha256(bytes),
       changes: {},
+      via,
+      remote,
+      merged: [],
     };
     await serial(async () => {
       await writeMaster(sent.id, bytes);
@@ -261,12 +299,17 @@ export async function sendForSignature(): Promise<boolean> {
     }));
   } catch (e) {
     console.error(e);
-    toast(`Couldn't prepare the document: ${(e as Error).message}`, 'error');
+    toast(`Couldn't send the document: ${(e as Error).message}`, 'error');
     return false;
   } finally {
     set({ busy: null });
   }
 
+  if (via !== 'email') {
+    const first = signersUp(sent).map((x) => x.name).join(', ');
+    toast(`Sent. ${via === 'folio-sign' ? 'Folio Sign' : 'Documenso'} emailed a signing link to ${first}.`, 'success');
+    return true;
+  }
   const up = signersUp(sent);
   const me = up.find((x) => sameEmail(x.email, sent.sender.email));
   if (me && up.length === 1) {
@@ -289,11 +332,68 @@ export async function sendForSignature(): Promise<boolean> {
   return true;
 }
 
-/** Emails whoever is next with the latest copy, as a reminder. */
+/** Fields of the request as Documenso wants them: per page, in percent of the page as shown. */
+async function documensoFields(env: Envelope): Promise<DocumensoField[]> {
+  const s = get();
+  const out: DocumensoField[] = [];
+  const add = (pageIndex: number, rect: { x: number; y: number; w: number; h: number }, signer: string, role: DocumensoField['role'], required: boolean) => {
+    const page = s.pages[pageIndex];
+    const a = pageToDisplay(page, 1, { x: rect.x, y: rect.y });
+    const b = pageToDisplay(page, 1, { x: rect.x + rect.w, y: rect.y + rect.h });
+    const size = displaySize(page, 1);
+    out.push({
+      signer,
+      role,
+      required,
+      page: pageIndex + 1,
+      x: (Math.min(a.x, b.x) / size.w) * 100,
+      y: (Math.min(a.y, b.y) / size.h) * 100,
+      w: (Math.abs(b.x - a.x) / size.w) * 100,
+      h: (Math.abs(b.y - a.y) / size.h) * 100,
+    });
+  };
+  for (const o of s.objects) {
+    if (o.type !== 'field' || !o.signer) continue;
+    const i = s.pages.findIndex((p) => p.id === o.page);
+    const role = o.role ?? (o.kind === 'signature' ? 'signature' : o.kind === 'checkbox' ? 'checkbox' : 'text');
+    if (i >= 0) add(i, o, o.signer, role, !!o.required);
+  }
+  // Fields already in the file stay in it; Documenso gets theirs at the same spots.
+  if (env.fields.length) {
+    const { findSpots } = await import('./signing');
+    const d = { ...s, envelope: env };
+    for (const spot of await findSpots(d)) {
+      const i = s.pages.findIndex((p) => p.id === spot.page);
+      if (i >= 0) add(i, spot.rect, spot.field.signer, spot.field.role, spot.field.required);
+    }
+  }
+  return out;
+}
+
+/** Reminds whoever is next: the signing service emails them again, or an email with the latest copy. */
 export async function remind(id: string) {
   const r = findRequest(id);
-  const bytes = r && (await masterBytes(id));
-  if (!r || !bytes) return;
+  if (!r) return;
+  const services = useServices.getState();
+  try {
+    if (r.via === 'folio-sign' && r.remote && services.folioSign) {
+      await remindRemote(services.folioSign, r.remote);
+      toast('Folio Sign sent the reminder', 'success');
+      return;
+    }
+    if (r.via === 'documenso' && r.remote && services.documenso) {
+      const st = await documensoStatus(services.documenso, r.remote);
+      const ids = st.recipients.filter((x) => x.status !== 'SIGNED' && x.status !== 'REJECTED').map((x) => x.id);
+      await documensoRemind(services.documenso, r.remote, ids);
+      toast('Documenso sent the reminder', 'success');
+      return;
+    }
+  } catch (e) {
+    toast(`Couldn't send the reminder: ${(e as Error).message}`, 'error');
+    return;
+  }
+  const bytes = await masterBytes(id);
+  if (!bytes) return;
   const up = signersUp(r.envelope);
   if (!up.length) return;
   const env = r.envelope;
@@ -338,10 +438,34 @@ export function recordOwnSignature(tab: string, env: Envelope, bytes: Uint8Array
 async function receiveCopy(tab: string, env: Envelope, bytes: Uint8Array) {
   await ensureLoaded();
   const r = findRequest(env.id);
-  if (!r || env.status === 'draft') return;
-  const report = await serial(async () => {
-    const cur = findRequest(env.id)!;
+  if (!r || env.status === 'draft' || r.via === 'documenso') return;
+  const report = await absorbCopy(r.id, env, bytes);
+  useRequests.setState((st) => ({ reports: { ...st.reports, [tab]: report } }));
+  tellAbout(report);
+}
+
+function tellAbout(report: ReturnReport) {
+  const latest = findRequest(report.request);
+  if (!latest) return;
+  if (report.newlySigned.length) {
+    const names = report.newlySigned.map((id) => signerById(latest.envelope, id)?.name ?? 'A signer').join(' and ');
+    const left = pendingSigners(latest.envelope).length;
+    toast(left ? `${names} signed "${latest.title}". ${left} still to sign.` : `Everyone has signed "${latest.title}". Finalize it to get the signed document.`, 'success');
+  }
+  if (report.changedPages.length) toast(`The copy from ${report.newlySigned.map((id) => signerById(latest.envelope, id)?.name).filter(Boolean).join(' and ') || 'a signer'} differs from the one you sent on page ${report.changedPages.join(', ')}.`, 'error');
+}
+
+/**
+ * Takes a returned copy into the request: checks its pages against what was
+ * sent and merges the signatures of whoever signed it into the master. `env`
+ * is the request as the copy has it (read from the copy when null).
+ */
+function absorbCopy(id: string, given: Envelope | null, bytes: Uint8Array): Promise<ReturnReport> {
+  return serial(async () => {
+    const cur = findRequest(id)!;
     const returned = await loadLib(bytes);
+    const env = given ?? readEnvelope(returned);
+    if (!env || env.id !== cur.envelope.id) return { request: cur.id, newlySigned: [], changedPages: [] };
     const hashes = await pageHashes(returned);
     const changedPages =
       hashes.length !== cur.baseline.length ? hashes.map((_, i) => i + 1) : hashes.flatMap((h, i) => (h === cur.baseline[i] ? [] : [i + 1]));
@@ -358,14 +482,80 @@ async function receiveCopy(tab: string, env: Envelope, bytes: Uint8Array) {
     await writeIndex(useRequests.getState().list.map((x) => (x.id === cur.id ? { ...x, envelope: merged, changes, updatedAt: Date.now() } : x)));
     return { request: cur.id, newlySigned: newly.map((x) => x.id), changedPages };
   });
-  useRequests.setState((st) => ({ reports: { ...st.reports, [tab]: report } }));
-  const latest = findRequest(env.id)!;
-  if (report.newlySigned.length) {
-    const names = report.newlySigned.map((id) => signerById(latest.envelope, id)?.name ?? 'A signer').join(' and ');
-    const left = pendingSigners(latest.envelope).length;
-    toast(left ? `${names} signed "${latest.title}". ${left} still to sign.` : `Everyone has signed "${latest.title}". Finalize it to get the signed document.`, 'success');
+}
+
+/* ------------------------------------------------------------------ */
+/* Signing services                                                     */
+/* ------------------------------------------------------------------ */
+
+const patchRecord = (id: string, patch: (r: TrackedRequest) => Partial<TrackedRequest>) =>
+  writeIndex(useRequests.getState().list.map((x) => (x.id === id ? { ...x, ...patch(x), updatedAt: Date.now() } : x)));
+
+/** Brings a request sent through a signing service up to date. */
+export async function syncRequest(id: string) {
+  const r = findRequest(id);
+  const services = useServices.getState();
+  if (!r?.remote || r.envelope.status !== 'out') return;
+  if (r.via === 'folio-sign' && services.folioSign) {
+    const remote = await getRemote(services.folioSign, r.remote);
+    const done = new Set(r.merged ?? []);
+    for (const copy of remote.copies) {
+      if (copy.n === 0 || done.has(copy.n)) continue;
+      const bytes = await remoteCopy(services.folioSign, r.remote, copy.n);
+      tellAbout(await absorbCopy(id, null, bytes));
+      done.add(copy.n);
+    }
+    const no = remote.recipients.find((x) => x.status === 'declined');
+    await serial(() =>
+      patchRecord(id, (cur) => ({
+        merged: [...done],
+        audit: remote.audit,
+        envelope:
+          no && !declined(cur.envelope)
+            ? { ...cur.envelope, events: mergeEvents(cur.envelope.events, [{ type: 'declined', at: no.declinedAt ?? Date.now(), signer: no.signer, note: no.reason }]) }
+            : cur.envelope,
+      })),
+    );
+    if (no && !declined(r.envelope)) toast(`${no.name} declined to sign "${r.title}"${no.reason ? `: ${no.reason}` : ''}`, 'error');
+    return;
   }
-  if (report.changedPages.length) toast(`This copy differs from the one you sent on page ${report.changedPages.join(', ')}.`, 'error');
+  if (r.via === 'documenso' && services.documenso) {
+    const st = await documensoStatus(services.documenso, r.remote);
+    const events = [...r.envelope.events];
+    for (const x of st.recipients) {
+      const signer = r.envelope.signers.find((p) => sameEmail(p.email, x.email));
+      if (!signer) continue;
+      const at = x.signedAt ? Date.parse(x.signedAt) || Date.now() : Date.now();
+      if (x.status === 'SIGNED' && signedAt(r.envelope, signer.id) === undefined) events.push({ type: 'signed', at, signer: signer.id });
+      if (x.status === 'REJECTED' && !declined(r.envelope)) events.push({ type: 'declined', at, signer: signer.id, note: x.reason ?? undefined });
+    }
+    let envelope: Envelope = { ...r.envelope, events: mergeEvents([], events) };
+    if (st.status === 'COMPLETED' && st.items[0]) {
+      // Documenso's signed and sealed document is the result.
+      await writeMaster(id, await documensoSigned(services.documenso, st.items[0]));
+      envelope = { ...envelope, status: 'completed', events: [...envelope.events, { type: 'completed', at: Date.now() }] };
+      toast(`Everyone has signed "${r.title}". Open it from Signature requests.`, 'success');
+    }
+    if (envelope.events.length !== r.envelope.events.length || envelope.status !== r.envelope.status) await serial(() => patchRecord(id, () => ({ envelope })));
+  }
+}
+
+let syncing: Promise<void> | null = null;
+
+/** Brings every request still out with a signing service up to date. */
+export function syncAll() {
+  syncing ??= (async () => {
+    await ensureLoaded();
+    for (const r of useRequests.getState().list) {
+      if (!r.remote || r.envelope.status !== 'out') continue;
+      try {
+        await syncRequest(r.id);
+      } catch (e) {
+        console.warn(`Couldn't update "${r.title}"`, e);
+      }
+    }
+  })().finally(() => (syncing = null));
+  return syncing;
 }
 
 const NM = PDFName.of('NM');
@@ -496,13 +686,28 @@ export async function finalizeRequest(id: string) {
   toast(`Saved ${out.name}. Send it to the signers so everyone has the signed document.`, 'success');
 }
 
-/** Emails the finished document to every signer. */
+/** Sends the finished document to every signer: through Folio Sign, or by email. */
 export async function sendFinal(tab: string | null) {
   const d = tabState(tab);
   const env = d?.envelope;
   if (!d || !env) return;
   const handle = d.fileHandle;
   const r = findRequest(env.id);
+  const fs = useServices.getState().folioSign;
+  if (r?.via === 'folio-sign' && r.remote && fs) {
+    const bytes = await masterBytes(r.id);
+    if (!bytes) return;
+    try {
+      set({ busy: 'Sending…' });
+      await finalRemote(fs, r.remote, bytes);
+      toast('Folio Sign sent the signed document to every signer', 'success');
+    } catch (e) {
+      toast(`Couldn't send it: ${(e as Error).message}`, 'error');
+    } finally {
+      set({ busy: null });
+    }
+    return;
+  }
   const bytes = handle ? null : r ? await masterBytes(r.id) : null;
   if (!handle && !bytes) return;
   const body = [
@@ -610,11 +815,26 @@ async function addSummaryPage(doc: PDFDocument, r: TrackedRequest, env: Envelope
   y -= 10;
 
   write('History', { font: bold, size: 12, gap: 2 });
-  for (const e of env.events) {
+  // From Folio Sign: where each signer opened their link and signed from.
+  const signedFrom = new Map((r.audit ?? []).filter((a) => a.type === 'signed' && a.signer && a.ip).map((a) => [a.signer!, a.ip!]));
+  const lines: { at: number; text: string }[] = env.events.map((e) => {
     const who = e.signer ? signerById(env, e.signer)?.name ?? 'A signer' : env.sender.name;
-    const what = e.type === 'sent' ? `Sent for signature by ${who}` : e.type === 'signed' ? `Signed by ${who}` : e.type === 'declined' ? `Declined by ${who}${e.note ? `: ${e.note}` : ''}` : 'Completed';
-    write(`${when(e.at)}   ${what}`);
+    const from = e.signer && signedFrom.get(e.signer);
+    const what =
+      e.type === 'sent'
+        ? `Sent for signature by ${who}`
+        : e.type === 'signed'
+          ? `Signed by ${who}${from ? ` from ${from}` : ''}`
+          : e.type === 'declined'
+            ? `Declined by ${who}${e.note ? `: ${e.note}` : ''}`
+            : 'Completed';
+    return { at: e.at, text: what };
+  });
+  for (const a of r.audit ?? []) {
+    if (a.type !== 'viewed') continue;
+    lines.push({ at: a.at, text: `Opened by ${signerById(env, a.signer ?? '')?.name ?? 'a signer'}${a.ip ? ` from ${a.ip}` : ''}` });
   }
+  for (const l of lines.sort((a, b) => a.at - b.at)) write(`${when(l.at)}   ${l.text}`);
   y -= 10;
 
   write('Checks', { font: bold, size: 12, gap: 2 });

@@ -35,6 +35,7 @@ import {
   History,
   Send,
   ListChecks,
+  Cloud,
 } from 'lucide-react';
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
 import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, openRecent, printDocument, saveDocument } from '../lib/commands';
@@ -64,6 +65,7 @@ export function Header() {
     { label: 'Combine files…', icon: <Files size={I} />, onClick: combinePdfs },
     { label: 'New blank document', icon: <FilePlus2 size={I} />, onClick: newBlankDocument },
     { label: 'Signature requests…', icon: <ListChecks size={I} />, onClick: () => set({ dialog: { kind: 'requests' } }) },
+    { label: 'Signing services…', icon: <Cloud size={I} />, onClick: () => set({ dialog: { kind: 'services' } }) },
     ...recentItems(),
     { separator: true },
     { label: 'Save', icon: <Save size={I} />, shortcut: `${MOD}+S`, disabled: !hasDoc, onClick: () => saveDocument() },

@@ -13,6 +13,7 @@ import { firstName, sameEmail, signerById, signersUp, signingDate, type Envelope
 import { composeMail } from './mail';
 import { isPathRef } from './files';
 import { baseName, uid } from './util';
+import { LINK_TOKEN } from './linkmode';
 
 const { get } = actions;
 
@@ -59,9 +60,16 @@ let run = 0;
 async function refreshSpots(tab: string) {
   const mine = ++run;
   const d = tabState(tab);
-  const env = d?.envelope;
+  const out = d ? await findSpots(d) : [];
+  if (mine !== run) return;
+  useSigning.setState((s) => ({ spots: { ...s.spots, [tab]: out } }));
+}
+
+/** The request's fields in the document's files, where they are on its pages. */
+export async function findSpots(d: Pick<DocState, 'envelope' | 'pages' | 'docs'>): Promise<Spot[]> {
+  const env = d.envelope;
   const out: Spot[] = [];
-  if (d && env && env.status !== 'draft' && env.fields.length) {
+  if (env && env.status !== 'draft' && env.fields.length) {
     const byName = new Map(env.fields.map((f) => [f.name, f]));
     for (const page of d.pages) {
       const doc = d.docs[page.src];
@@ -89,8 +97,7 @@ async function refreshSpots(tab: string) {
       }
     }
   }
-  if (mine !== run) return;
-  useSigning.setState((s) => ({ spots: { ...s.spots, [tab]: out } }));
+  return out;
 }
 
 useStore.subscribe((s, prev) => {
@@ -275,6 +282,23 @@ export async function finishSigning() {
     undo();
     return;
   }
+  if (LINK_TOKEN) {
+    // Signing from a Folio Sign link: the signed copy goes back to the service.
+    try {
+      actions.set({ busy: 'Sending your signature…' });
+      const { submitLink } = await import('./linksign');
+      await submitLink(res.bytes);
+    } catch (e) {
+      undo();
+      toast(`Couldn't send your signature: ${(e as Error).message}`, 'error');
+      return;
+    } finally {
+      actions.set({ busy: null });
+    }
+    patchTab(tab, { dirty: false });
+    stopSigning(tab);
+    return;
+  }
   const { saveBytes } = await import('./files');
   const out = await saveBytes(res.bytes, `${baseName(s.fileName).replace(/ \((for signature|signed[^)]*)\)$/, '') || env.title} (signed by ${firstName(me.name)}).pdf`, null, true);
   if (!out) {
@@ -327,6 +351,16 @@ export async function declineSigning(reason: string) {
   const signer = env && tab ? currentSigner(env, tab, s.userEmail) : null;
   const me = env && signer ? signerById(env, signer) : undefined;
   if (!tab || !env || !me || s.busy) return;
+  if (LINK_TOKEN) {
+    try {
+      const { declineLink } = await import('./linksign');
+      await declineLink(reason.trim());
+      stopSigning(tab);
+    } catch (e) {
+      toast(`Couldn't decline: ${(e as Error).message}`, 'error');
+    }
+    return;
+  }
   commit((st) => ({ envelope: st.envelope && { ...st.envelope, events: [...st.envelope.events, { type: 'declined', at: Date.now(), signer: me.id, note: reason.trim() || undefined }] } }));
   const { buildCurrent } = await import('./commands');
   const res = await buildCurrent();

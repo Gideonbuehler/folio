@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowUp,
   BellRing,
+  RefreshCw,
   CalendarDays,
   CircleCheck,
   Clock,
@@ -36,9 +37,11 @@ import {
   updateSigner,
   usePrepare,
 } from '../lib/prepare';
-import { finalizeRequest, forgetRequest, loadRequests, openLatest, remind, sendForSignature, useRequests, type TrackedRequest } from '../lib/requests';
+import { finalizeRequest, forgetRequest, loadRequests, openLatest, remind, sendForSignature, syncAll, useRequests, type TrackedRequest } from '../lib/requests';
 import { mailMethodText } from '../lib/mail';
-import { Button, IconButton, Modal, Toggle } from './ui';
+import { configured, setServices, useServices, VIA_LABEL, type SendVia } from '../lib/services';
+import { askConfirm } from '../lib/native';
+import { Button, IconButton, Modal, Segmented, Toggle } from './ui';
 
 const ROLE_ICON: Record<SignRole, ReactNode> = {
   signature: <FileSignature size={16} />,
@@ -250,17 +253,29 @@ function SignerRow({ s, index, count, active, last, ordered }: { s: Signer; inde
 
 const close = () => actions.set({ dialog: null });
 
+const VIA_TEXT: Record<Exclude<SendVia, 'email'>, string> = {
+  'folio-sign':
+    'Folio Sign emails each signer a personal link when it is their turn. They sign in their browser, and you see who opened and signed it, with a record of when and from where.',
+  documenso: 'Documenso emails the signers, collects the signatures and seals the signed document. Folio shows its progress and fetches the signed document.',
+};
+
 /** Last check before the request goes out. */
 export function SendRequestDialog() {
   const env = useStore((s) => s.envelope);
+  const services = useServices();
   const [how, setHow] = useState('');
   const [sending, setSending] = useState(false);
+  const via = configured(services, services.via) ? services.via : 'email';
   useEffect(() => {
     void mailMethodText().then(setHow);
   }, []);
   if (!env) return null;
   const problems = sendProblems();
   const first = env.order === 'sequential' ? env.signers.slice(0, 1) : env.signers;
+  const choose = (v: SendVia) => {
+    if (!configured(services, v)) actions.set({ dialog: { kind: 'services', back: true } });
+    else setServices({ via: v });
+  };
   return (
     <Modal
       title="Send for signature"
@@ -275,10 +290,18 @@ export function SendRequestDialog() {
             onClick={async () => {
               setSending(true);
               close();
-              if (await sendForSignature()) usePrepare.setState({ open: false, role: null });
+              if (await sendForSignature(via)) usePrepare.setState({ open: false, role: null });
             }}
           >
-            <Mail size={16} /> Prepare email
+            {via === 'email' ? (
+              <>
+                <Mail size={16} /> Prepare email
+              </>
+            ) : (
+              <>
+                <Send size={16} /> Send
+              </>
+            )}
           </Button>
         </>
       }
@@ -298,10 +321,25 @@ export function SendRequestDialog() {
             <b>{env.title}</b> goes to {first.map((s) => `${s.name} (${s.email})`).join(', ')}
             {env.order === 'sequential' && env.signers.length > 1 ? `, then ${env.signers.slice(1).map((s) => s.name).join(', then ')}` : ''}.
           </p>
-          <p className="muted">{how}</p>
+          <div className="send-via">
+            <span className="field-label">Send with</span>
+            <Segmented
+              value={via}
+              onChange={choose}
+              options={(['email', 'folio-sign', 'documenso'] as SendVia[]).map((v) => ({
+                value: v,
+                label: configured(services, v) ? VIA_LABEL[v] : `${VIA_LABEL[v]}…`,
+                tip: configured(services, v) ? undefined : 'Set up first',
+              }))}
+            />
+          </div>
+          <p className="muted">{via === 'email' ? how : VIA_TEXT[via]}</p>
           <p className="muted small">
-            Folio keeps a copy of what you send. When a signed copy comes back, open it in Folio: the signatures are added to your copy and every page is checked
-            against what you sent. Nothing is uploaded anywhere.
+            {via === 'email'
+              ? 'Folio keeps a copy of what you send. When a signed copy comes back, open it in Folio: the signatures are added to your copy and every page is checked against what you sent. Nothing is uploaded anywhere.'
+              : via === 'folio-sign'
+                ? 'The document is uploaded to your Folio Sign server. Folio collects the signed copies from it, checks every page against what you sent, and you finalize the document as usual.'
+                : 'The document is uploaded to Documenso, which keeps it under its own terms.'}
           </p>
         </>
       )}
@@ -317,6 +355,7 @@ function statusOf(r: TrackedRequest): { icon: ReactNode; text: string; tone: str
   if (env.status === 'completed') return { icon: <CircleCheck size={16} />, text: 'Completed', tone: 'done' };
   if (no) return { icon: <TriangleAlert size={16} />, text: `Declined by ${signerById(env, no.signer ?? '')?.name ?? 'a signer'}`, tone: 'bad' };
   const left = pendingSigners(env);
+  if (!left.length && r.via === 'documenso') return { icon: <Clock size={16} />, text: 'Everyone signed: Documenso is finishing the document', tone: 'wait' };
   if (!left.length) return { icon: <CircleCheck size={16} />, text: 'Everyone signed: ready to finalize', tone: 'ready' };
   const up = signersUp(env);
   return { icon: <Clock size={16} />, text: `Waiting for ${up.map((s) => s.name).join(', ')}`, tone: 'wait' };
@@ -324,11 +363,32 @@ function statusOf(r: TrackedRequest): { icon: ReactNode; text: string; tone: str
 
 export function RequestsDialog() {
   const list = useRequests((s) => s.list);
+  const [busy, setBusy] = useState(false);
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      await loadRequests();
+      await syncAll();
+    } finally {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
-    void loadRequests();
+    void refresh();
   }, []);
   return (
-    <Modal title="Signature requests" onClose={close} width={620}>
+    <Modal
+      title="Signature requests"
+      onClose={close}
+      width={620}
+      footer={
+        list.some((r) => r.remote && r.envelope.status === 'out') ? (
+          <Button variant="ghost" disabled={busy} onClick={() => void refresh()}>
+            <RefreshCw size={15} className={busy ? 'spin' : ''} /> Check for updates
+          </Button>
+        ) : undefined
+      }
+    >
       {!list.length && <p className="muted">Requests you send for signature appear here, with who has signed so far.</p>}
       <ul className="request-list">
         {list.map((r) => (
@@ -351,7 +411,8 @@ function RequestItem({ r }: { r: TrackedRequest }) {
         <div className="request-item-title">
           <strong>{r.title}</strong>
           <span className="muted small">
-            Sent {when(r.sentAt)} · {st.text}
+            Sent {when(r.sentAt)}
+            {r.via && r.via !== 'email' ? ` with ${VIA_LABEL[r.via]}` : ''} · {st.text}
           </span>
         </div>
       </div>
@@ -373,7 +434,7 @@ function RequestItem({ r }: { r: TrackedRequest }) {
         </p>
       ))}
       <div className="request-item-actions">
-        {env.status === 'out' && !pendingSigners(env).length && !declined(env) && (
+        {env.status === 'out' && !pendingSigners(env).length && !declined(env) && r.via !== 'documenso' && (
           <Button
             variant="primary"
             onClick={() => {
@@ -397,7 +458,13 @@ function RequestItem({ r }: { r: TrackedRequest }) {
             <BellRing size={16} /> Remind
           </Button>
         )}
-        <Button variant="ghost" onClick={() => void forgetRequest(r.id)}>
+        <Button
+          variant="ghost"
+          onClick={async () => {
+            if (r.via === 'folio-sign' && env.status === 'out' && !(await askConfirm(`Remove "${r.title}"? Its signing links stop working.`, 'Remove'))) return;
+            void forgetRequest(r.id);
+          }}
+        >
           Remove
         </Button>
       </div>

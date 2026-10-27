@@ -393,6 +393,8 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // Signing services whose APIs don't allow calls from a web page (CORS).
+        .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
             startup_files,
             read_file,
