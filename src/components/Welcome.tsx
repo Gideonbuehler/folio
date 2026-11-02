@@ -1,15 +1,17 @@
 import { useEffect } from 'react';
-import { EyeOff, FilePlus2, Files, FileText, FolderOpen, Highlighter, LayoutGrid, Lock, PenLine, Signature, TextCursorInput, ShieldCheck, X } from 'lucide-react';
+import { EyeOff, FilePlus2, Files, FileText, FolderOpen, Highlighter, LayoutGrid, Lock, PenLine, Send, Signature, TextCursorInput, ShieldCheck, X } from 'lucide-react';
 import { combinePdfs, newBlankDocument, openPdf, openRecent } from '../lib/commands';
 import { clearRecent, loadRecent, removeRecent, useRecent, visibleRecent } from '../lib/recent';
 import { MOD } from '../lib/util';
 import { IconButton } from './ui';
+import { OutForSignature } from './RequestPanel';
 
 const FEATURES = [
   { icon: <TextCursorInput size={18} />, title: 'Edit text', text: 'Click any line to rewrite it in place.' },
   { icon: <Highlighter size={18} />, title: 'Annotate', text: 'Highlight, underline, notes and comments.' },
   { icon: <PenLine size={18} />, title: 'Draw & shapes', text: 'Pen, arrows, boxes, text boxes and images.' },
   { icon: <Signature size={18} />, title: 'Fill & sign', text: 'Fill forms, then sign by drawing or typing.' },
+  { icon: <Send size={18} />, title: 'Request signatures', text: 'Send a document out for signature by email.' },
   { icon: <LayoutGrid size={18} />, title: 'Organize', text: 'Reorder, rotate, insert, extract and merge pages.' },
   { icon: <EyeOff size={18} />, title: 'Redact', text: 'Permanently remove sensitive content.' },
   { icon: <Lock size={18} />, title: 'Protect', text: 'Encrypt with a password (AES-256).' },
@@ -42,6 +44,7 @@ export function Welcome() {
         <p className="drop-hint">
           or drop a PDF anywhere · <kbd>{MOD}+O</kbd>
         </p>
+        <OutForSignature />
         <RecentFiles />
       </div>
       <div className="features">

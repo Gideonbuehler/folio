@@ -1,6 +1,6 @@
 import { zipSync } from 'fflate';
 import { actions, closeTab, findTab, insertDocuments, openDocuments, patchTab, switchTab, tabState, toast } from '../store';
-import { download, pickFiles, saveBytes, type Picked } from './files';
+import { download, pickFiles, saveBytes, type FileRef, type Picked } from './files';
 import { pdfjs } from './pdfjs';
 import { baseName, formatBytes, readFileDataUrl } from './util';
 import { insertImageFile } from './images';
@@ -139,9 +139,23 @@ async function build(opts: ExportOptions = {}) {
   const s = get();
   const { buildPdf } = await import('./export');
   return buildPdf(
-    { docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr },
+    { docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr, envelope: s.envelope },
     { ...opts, onProgress: (t) => set({ busy: t }) },
   );
+}
+
+/** The open document as saving would write it; null (after telling the user) if that failed. */
+export async function buildCurrent(opts: ExportOptions = {}) {
+  set({ busy: 'Preparing the document…' });
+  try {
+    return await build(opts);
+  } catch (e) {
+    console.error(e);
+    toast(`Couldn't prepare the document: ${(e as Error).message}`, 'error');
+    return null;
+  } finally {
+    set({ busy: null });
+  }
 }
 
 function pdfName(name: string) {
@@ -163,9 +177,10 @@ function signatureCount() {
   return [...new Set(s.pages.map((p) => p.src))].reduce((n, id) => n + (byDoc[id]?.length ?? 0), 0);
 }
 
-export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; name?: string } & ExportOptions = {}) {
+/** Saves the open document; resolves to where it went, or null if it wasn't saved. */
+export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; name?: string } & ExportOptions = {}): Promise<{ handle: FileRef | null; name: string } | null> {
   const s = get();
-  if (!s.pages.length || s.busy) return;
+  if (!s.pages.length || s.busy) return null;
   if (s.editing) set({ editing: null });
   // The save dialog may be up a while; the result belongs to this tab whichever is active by then.
   const tab = s.activeTab;
@@ -177,7 +192,7 @@ export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; nam
       `This document is digitally signed. Saving ${plain ? 'your changes' : 'with these options'} rewrites it, so the signature${signed === 1 ? '' : 's'} will be removed. Save anyway?`,
       'Save',
     );
-    if (!ok) return;
+    if (!ok) return null;
   }
   set({ busy: 'Saving…' });
   try {
@@ -187,14 +202,16 @@ export async function saveDocument(opts: { saveAs?: boolean; copy?: boolean; nam
     const name = pdfName(opts.name ?? s.fileName);
     const forcePicker = !!opts.saveAs || !!opts.copy || !s.fileHandle;
     const out = await saveBytes(res.bytes, name, opts.copy ? null : s.fileHandle, forcePicker);
-    if (!out) return;
+    if (!out) return null;
     if (!opts.copy) patchTab(tab, { dirty: false, fileHandle: out.handle ?? s.fileHandle, fileName: out.name });
     if (opts.reduce) toast(reductionReport(currentSize(), res.bytes.length, res.reduced?.images ?? 0), 'success');
     else toast(out.handle ? `Saved ${out.name}` : `Downloaded ${out.name}`, 'success');
     for (const w of res.warnings) toast(w, 'info');
+    return out;
   } catch (e) {
     console.error(e);
     toast(`Save failed: ${(e as Error).message}`, 'error');
+    return null;
   } finally {
     set({ busy: null });
   }

@@ -1,0 +1,522 @@
+/* ==================================================================
+   Signature requests
+   ================================================================== */
+
+/* Preparing: the panel on the right */
+
+.request-panel {
+  width: 300px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  animation: request-in 0.14s ease-out;
+}
+@keyframes request-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+}
+.request-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.request-body section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.request-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.request-heading b {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+}
+.request-heading .toggle {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.request-note {
+  margin: 0;
+}
+.request-foot {
+  flex: none;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+}
+.request-foot .btn {
+  flex: 1;
+  justify-content: center;
+}
+.request-message {
+  resize: vertical;
+  min-height: 64px;
+  font: inherit;
+  line-height: 1.4;
+  padding: 8px 10px;
+}
+.input.invalid {
+  border-color: var(--danger);
+}
+
+.signer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.signer-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--signer);
+  background: var(--panel);
+}
+.signer-row.active {
+  background: color-mix(in srgb, var(--signer) 7%, var(--panel));
+  border-color: color-mix(in srgb, var(--signer) 45%, var(--border));
+  border-left-color: var(--signer);
+}
+.signer-dot {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--signer);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.signer-dot.sm {
+  width: 10px;
+  height: 10px;
+  margin: 0;
+}
+.signer-inputs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.signer-inputs .input {
+  height: 28px;
+  font-size: 12.5px;
+}
+.signer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.add-signer {
+  align-self: flex-start;
+}
+
+.role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.role-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+.role-btn svg {
+  color: var(--signer);
+  flex: none;
+}
+.role-btn:hover {
+  background: var(--hover);
+}
+.role-btn.on {
+  border-color: var(--signer);
+  background: color-mix(in srgb, var(--signer) 10%, var(--panel));
+  box-shadow: 0 0 0 1px var(--signer);
+}
+
+.request-problems {
+  display: flex;
+  gap: 10px;
+  color: var(--danger);
+}
+.request-problems ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text);
+}
+.request-problems li + li {
+  margin-top: 4px;
+}
+
+/* Requests sent: the list */
+
+.request-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.request-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.request-item-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.request-item-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.request-status {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  margin-top: 1px;
+}
+.tone-wait > .request-item-head .request-status,
+.request-status.tone-wait {
+  color: #e67700;
+}
+.tone-ready > .request-item-head .request-status,
+.tone-done > .request-item-head .request-status,
+.request-status.tone-ready,
+.request-status.tone-done {
+  color: var(--success);
+}
+.tone-bad > .request-item-head .request-status,
+.request-status.tone-bad {
+  color: var(--danger);
+}
+.request-signers {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.request-signers li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.request-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--danger);
+}
+.request-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-left: 26px;
+}
+
+/* An open document that was sent for signature: the bar */
+
+.signing-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(820px, calc(100% - 40px));
+  padding: 6px 6px 6px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  color: var(--text);
+}
+/* Below the certificate signature bar when both show. */
+.sig-bar ~ .signing-bar {
+  top: 54px;
+}
+.signing-bar > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.signing-bar em {
+  font-style: normal;
+  color: var(--text-2);
+}
+.signing-bar > svg {
+  flex: none;
+}
+.signing-bar.tone-wait > svg {
+  color: #e67700;
+}
+.signing-bar.tone-done > svg {
+  color: var(--success);
+}
+.signing-bar.tone-bad > svg,
+.signing-bar.tone-bad em {
+  color: var(--danger);
+}
+.signing-bar.tone-active {
+  border-color: color-mix(in srgb, var(--signer) 50%, var(--border));
+}
+.signing-bar.tone-active > svg {
+  color: var(--signer);
+}
+.signing-bar .sig-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sig-bar-btn.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.sig-bar-link {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  padding: 3px 6px;
+  cursor: pointer;
+  border-radius: 999px;
+}
+.sig-bar-link:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.sig-bar-x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.sig-bar-x:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.signing-who {
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12.5px;
+  width: auto;
+}
+
+/* The request's fields on a page */
+
+.sign-spots {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.sign-spot {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 2px;
+}
+.sign-spot.guard,
+.sign-spot.fixed {
+  pointer-events: auto;
+  cursor: not-allowed;
+}
+.sign-spot.sign {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0;
+  border: 1.5px dashed var(--signer);
+  background: color-mix(in srgb, #ffd43b 30%, transparent);
+  color: #1b1f27;
+  font: inherit;
+  cursor: pointer;
+  animation: spot-pulse 2.4s ease-in-out infinite;
+}
+.sign-spot.sign span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: -1px 0 0 -1px;
+  padding: 1px 6px 1px 7px;
+  border-radius: 1px 0 6px 0;
+  background: var(--signer);
+  color: #fff;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.sign-spot.sign.done {
+  background: transparent;
+  border-color: transparent;
+  animation: none;
+}
+.sign-spot.sign.done:hover {
+  border-color: var(--signer);
+}
+@keyframes spot-pulse {
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--signer) 25%, transparent);
+  }
+}
+.sign-spot.outlined {
+  outline: 1.5px solid color-mix(in srgb, var(--signer) 70%, transparent);
+  outline-offset: 1px;
+}
+.sign-spot.todo {
+  outline-style: dashed;
+  background: color-mix(in srgb, #ffd43b 18%, transparent);
+}
+
+/* Signing services */
+
+.send-via {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+.service {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+}
+.service h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+}
+.service p {
+  margin: 0;
+}
+.service-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+.service-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.service-check.ok {
+  color: var(--success);
+}
+.service-check.error {
+  color: var(--danger);
+}
+
+/* Signing from a Folio Sign link */
+
+.link-header .link-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-status {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--bg);
+}
+.link-card {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 28px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.link-card h1 {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 650;
+}
+.link-card p {
+  margin: 0 0 6px;
+  color: var(--text-2);
+}
+.link-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}

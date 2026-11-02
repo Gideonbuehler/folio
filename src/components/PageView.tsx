@@ -13,6 +13,8 @@ import { ocrKey } from '../lib/ocrModel';
 import { Overlay } from './Overlay';
 import { ScanNotice } from './Ocr';
 import { OBJ_LABEL } from './labels';
+import { SignSpots } from './SigningBar';
+import { useFormsVersion } from '../lib/signing';
 
 const MAX_CANVAS_PIXELS = 16_777_216;
 
@@ -35,6 +37,8 @@ interface Props {
 export const PageView = memo(function PageView({ page, index, zoom, top, left, objects }: Props) {
   const doc = useStore((s) => s.docs[page.src]);
   const ocr = useStore((s) => s.ocr[ocrKey(page)]);
+  // Bumped when Folio fills in form fields itself (signature requests), so the form layer shows them.
+  const formsVersion = useFormsVersion();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const annotRef = useRef<HTMLDivElement>(null);
@@ -236,7 +240,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfPage, doc, page.index, page.rotation]);
+  }, [pdfPage, doc, page.index, page.rotation, formsVersion]);
 
   const style = {
     top,
@@ -257,6 +261,7 @@ export const PageView = memo(function PageView({ page, index, zoom, top, left, o
       <SearchHits page={page} zoom={zoom} textLayer={textLayer} layerKey={layerKey} pageRef={pageRef} />
       <div ref={annotRef} className="annotationLayer" />
       <Overlay page={page} zoom={zoom} objects={objects} pdfPage={pdfPage} canvasRef={canvasRef} shown={shown} holes={holes} liveFailed={liveFailed} canvasVersion={canvasVersion} />
+      <SignSpots page={page} zoom={zoom} />
       <CommentPopup page={page} zoom={zoom} objects={objects} />
       <ScanNotice page={page} doc={doc} recognized={!!ocr} />
       {!rendered && <div className="page-loading" />}

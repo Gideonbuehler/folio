@@ -13,6 +13,9 @@ import { SignatureDialog } from './SignatureDialog';
 import { FieldDialog } from './FieldDialog';
 import { CertSignDialog, SignaturesDialog } from './CertSign';
 import { UnsavedDialog } from './SessionDialogs';
+import { RequestsDialog, SendRequestDialog } from './RequestPanel';
+import { DeclineDialog } from './SigningBar';
+import { ServicesDialog } from './ServicesDialog';
 
 const close = () => actions.set({ dialog: null });
 
@@ -24,7 +27,7 @@ export function DialogHost() {
   if (!dialog) return null;
   switch (dialog.kind) {
     case 'signature':
-      return <SignatureDialog />;
+      return <SignatureDialog key={dialog.target?.field ?? ''} target={dialog.target} />;
     case 'watermark':
       return <WatermarkDialog />;
     case 'pageNumbers':
@@ -47,6 +50,14 @@ export function DialogHost() {
       return <SignaturesDialog />;
     case 'unsaved':
       return <UnsavedDialog name={dialog.name} resolve={dialog.resolve} />;
+    case 'sendRequest':
+      return <SendRequestDialog />;
+    case 'requests':
+      return <RequestsDialog />;
+    case 'decline':
+      return <DeclineDialog />;
+    case 'services':
+      return <ServicesDialog back={dialog.back} />;
   }
 }
 

@@ -129,7 +129,7 @@ export async function signAndSave(req: SignRequest) {
       bytes = original.bytes;
     } else {
       const { buildPdf } = await import('./export');
-      const res = await buildPdf({ docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta }, { objectStreams: false, onProgress: (t) => set({ busy: t }) });
+      const res = await buildPdf({ docs: s.docs, pages: s.pages, objects: s.objects, meta: s.meta, ocr: s.ocr, envelope: s.envelope }, { objectStreams: false, onProgress: (t) => set({ busy: t }) });
       bytes = res.bytes;
     }
     set({ busy: 'Signing…' });

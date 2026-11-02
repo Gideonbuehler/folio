@@ -42,6 +42,11 @@ import { TooltipLayer } from './components/Tooltip';
 import { OcrProgress } from './components/Ocr';
 import { CompareView } from './components/CompareView';
 import { SignatureBar } from './components/CertSign';
+import { RequestPanel } from './components/RequestPanel';
+import { SigningBar } from './components/SigningBar';
+import { loadRequests, syncAll } from './lib/requests';
+import { LINK_TOKEN } from './lib/linkmode';
+import { LinkApp } from './components/LinkSigning';
 import { useCompare } from './lib/compare';
 
 const { get, set } = actions;
@@ -64,13 +69,31 @@ const TOOL_KEYS: Record<string, Tool> = {
 };
 
 export function App() {
+  useTheme();
+  // Opened from a Folio Sign signing link: just that document, to sign.
+  if (LINK_TOKEN)
+    return (
+      <LinkApp
+        extras={
+          <>
+            <DialogHost />
+            <Toasts />
+            <Busy />
+            <TooltipLayer />
+          </>
+        }
+      />
+    );
+  return <EditorApp />;
+}
+
+function EditorApp() {
   const hasDoc = useStore((s) => s.pages.length > 0);
   const organize = useStore((s) => s.organize);
   const comparing = useCompare((s) => s.open);
   const hasTabs = useStore((s) => s.tabs.length > 0);
   // Each tab gets fresh views, so scroll positions and per-page renders never leak between documents.
   const tab = useStore((s) => s.activeTab) ?? '';
-  useTheme();
   useSession();
   useShortcuts();
   useClipboard();
@@ -93,7 +116,9 @@ export function App() {
             <Fragment key={tab}>
               <Sidebar />
               <Viewer />
+              <RequestPanel />
               <SignatureBar />
+              <SigningBar />
             </Fragment>
           )
         ) : (
@@ -132,6 +157,8 @@ function useSession() {
   useEffect(() => {
     void startRecovery();
     startRecent();
+    // Requests out with a signing service may have news.
+    void loadRequests().then(() => syncAll());
   }, []);
 }
 

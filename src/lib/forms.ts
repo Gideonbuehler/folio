@@ -6,6 +6,7 @@ import type { FieldKind, FieldObj, PageItem, Rect } from '../types';
 import { actions, commit, toast } from '../store';
 import { loadSource } from './pdfjs';
 import { uid } from './util';
+import { assignment } from './prepare';
 
 const { get, set } = actions;
 
@@ -34,7 +35,7 @@ export function primeFieldNames() {
   }
 }
 
-function namesInUse() {
+export function namesInUse() {
   const names = new Set<string>();
   const s = get();
   const srcs = new Set(s.pages.map((p) => p.src));
@@ -55,6 +56,9 @@ export function uniqueFieldName(kind: FieldKind) {
 export function newField(kind: FieldKind, page: PageItem, r: Rect): FieldObj {
   const s = get();
   const base = { id: uid(), page: page.id, created: Date.now(), author: s.userName, opacity: 1, type: 'field' as const, kind, ...r, fontSize: 0 };
+  // Placing a field for a signer of a signature request.
+  const a = assignment();
+  if (a) return { ...base, ...a };
   if (kind === 'radio') {
     const last = [...s.objects].reverse().find((o): o is FieldObj => o.type === 'field');
     if (last?.kind === 'radio' && last.page === page.id) {
@@ -84,12 +88,13 @@ export async function makeFieldsFillable() {
     const { buildPdf } = await import('./export');
     // User rotation is kept out of the file so page space stays the same.
     const flat = s.pages.map((p) => ({ ...p, rotation: 0 as const }));
-    const res = await buildPdf({ docs: s.docs, pages: flat, objects: fields, meta: s.meta });
+    const res = await buildPdf({ docs: s.docs, pages: flat, objects: fields, meta: s.meta, envelope: s.envelope });
     const { doc, pages } = await loadSource(res.bytes, s.fileName, async () => null);
     const next = s.pages.map((p, i) => ({ ...pages[i], id: p.id, rotation: p.rotation }));
     const gone = new Set(fields.map((f) => f.id));
     set((st) => ({ docs: { ...st.docs, [doc.id]: doc } }));
-    commit((st) => ({ pages: next, objects: st.objects.filter((o) => !gone.has(o.id)) }));
+    // Signature request fields now live in the file, under the names they got there.
+    commit((st) => ({ pages: next, objects: st.objects.filter((o) => !gone.has(o.id)), envelope: res.envelope ?? st.envelope }));
     set((st) => ({ selection: st.selection.filter((id) => !gone.has(id)), tool: 'select' }));
     sourceNames.set(doc.id, new Set(fields.map((f) => f.name)));
     toast(`${fields.length} form field${fields.length === 1 ? ' is' : 's are'} ready to fill`, 'success');

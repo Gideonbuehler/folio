@@ -4,6 +4,8 @@ import type { FieldObj, Obj, PageItem, TextObj } from '../types';
 import { arrowHead, cropRect, markupQuads, NOTE_SIZE, rotationMatrix } from '../lib/geometry';
 import { layoutText, LINE_HEIGHT, measureText, TEXT_PAD, useFontsVersion } from '../lib/fonts';
 import { fontStack } from '../lib/fontdb';
+import { ROLE_LABEL } from '../lib/envelope';
+import { useStore } from '../store';
 
 export function inkPath(s: number[]) {
   const n = s.length / 2;
@@ -26,7 +28,8 @@ export function cssTransform(p: PageItem, zoom: number) {
 
 /** Vector objects painted below text: whiteouts, covers, shapes, ink, images. */
 export function BaseShape({ o }: { o: Obj }) {
-  const common = { 'data-id': o.id, opacity: o.opacity < 1 ? o.opacity : undefined };
+  // A signature in a request field isn't moved around; clicking its field signs again.
+  const common = { 'data-id': o.type === 'image' && o.stamp ? undefined : o.id, opacity: o.opacity < 1 ? o.opacity : undefined };
   switch (o.type) {
     case 'whiteout':
       return <rect {...common} className="hit-fill" x={o.x} y={o.y} width={o.w} height={o.h} fill={o.color} />;
@@ -93,6 +96,8 @@ export function BaseShape({ o }: { o: Obj }) {
 
 /** A form field as it will look once saved, with its name shown while it's empty. */
 function FieldShape({ o }: { o: FieldObj }) {
+  const signer = useStore((s) => (o.signer ? s.envelope?.signers.find((x) => x.id === o.signer) : undefined));
+  if (signer) return <RequestFieldShape o={o} color={signer.color} who={signer.name.trim() || signer.email || 'Signer'} />;
   const size = o.fontSize || Math.max(5, Math.min(12, (o.kind === 'multiline' ? 12 : o.h * 0.62)));
   const pad = 2;
   const text = o.kind === 'dropdown' ? o.value || '' : o.kind === 'text' || o.kind === 'multiline' ? o.value || '' : '';
@@ -283,5 +288,29 @@ export function StaticObjects({ page, objects, zoom, native }: { page: PageItem;
         </g>
       </svg>
     </div>
+  );
+}
+
+/** A field placed for a signer of a signature request: tinted in their color and labeled with what it's for. */
+function RequestFieldShape({ o, color, who }: { o: FieldObj; color: string; who: string }) {
+  const small = Math.min(9, Math.max(4, o.h * 0.36));
+  const role = o.role ?? (o.kind === 'signature' ? 'signature' : o.kind === 'checkbox' ? 'checkbox' : 'text');
+  const label = o.kind === 'checkbox' ? '' : `${ROLE_LABEL[role]} · ${who}`;
+  return (
+    <g data-id={o.id} className="hit-fill form-field request-field">
+      <rect x={o.x + 0.5} y={o.y + 0.5} width={Math.max(0, o.w - 1)} height={Math.max(0, o.h - 1)} fill={color} fillOpacity={0.1} stroke={color} strokeWidth={1} />
+      <svg x={o.x} y={o.y} width={o.w} height={o.h} viewBox={`0 0 ${o.w} ${o.h}`} overflow="hidden">
+        {label && (
+          <text x={3} y={o.kind === 'signature' ? 3 + small : o.h / 2 + small * 0.35} fontSize={small} fill={color} fontFamily="Helvetica, Arial, sans-serif">
+            {o.kind === 'signature' ? `✎ ${label}` : label}
+          </text>
+        )}
+        {o.required && (
+          <text x={o.w - 1.5} y={Math.min(7, o.h * 0.6)} fontSize={Math.min(9, Math.max(5, o.h * 0.5))} textAnchor="end" fill={color}>
+            *
+          </text>
+        )}
+      </svg>
+    </g>
   );
 }

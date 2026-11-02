@@ -89,6 +89,52 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   real AcroForm fields with appearances, fillable in any reader; "Make fields
   fillable now" does the same in place so you can fill them in Folio straight
   away (Undo turns them back into editable designs).
+- Request signatures (Tools menu): add signers (name and email, in order or
+  all at once), pick a signer and place their fields: signature, initials,
+  date signed, name, text and check boxes, each tinted in the signer's color.
+  "Send for signature" writes the fields and the request into a copy and opens
+  an email to the first signer with the copy attached. Folio never sends mail
+  itself and nothing is uploaded: the desktop app hands the message to a mail
+  program that takes attachments (Simple MAPI: classic Outlook, Thunderbird),
+  and otherwise saves the copy, shows it in its folder and opens a mailto:
+  link; the browser uses the share sheet, or a download and a mailto: link.
+  - Signers who open the PDF in Folio see whose turn it is, click "Start
+    signing" and are taken through their fields: signature and initials
+    fields open the signature dialog and take the signature in place, date
+    and name fill in by themselves, everyone else's fields are locked. Finish
+    saves the signed copy and opens the email to the next signer (with the
+    sender in copy), or back to the sender. They can also decline, with a
+    reason. Without Folio, the fields work in any reader that fills forms.
+  - The sender's Folio keeps a copy of what it sent and a fingerprint of every
+    page. Opening a signed copy that comes back adds its signatures to that
+    copy (so copies signed in parallel are combined) and says if any page
+    differs from what was sent. File > Signature requests lists every request
+    with who has signed, with Remind and Open. When everyone has signed,
+    Finalize flattens the signatures and fields into the pages, adds a
+    signing summary page (signers, times, history, what was checked and the
+    SHA-256 of the copy sent) and saves the signed document, ready to email
+    to the signers.
+  - The request travels inside the PDF as a custom entry in the document
+    information dictionary; signatures are locked stamp annotations named
+    after their field until the sender finalizes. Signers are identified by
+    the address the email went to; for proof against later changes, sign the
+    finished document with a certificate.
+  - Instead of your own email, a request can go out through a signing service
+    (File > Signing services, then pick it in the send dialog):
+    - Folio Sign, the signing server in `server/` (see below), emails each
+      signer a personal link when it's their turn. The link opens Folio in the
+      browser with just that document and the signing bar; finishing uploads
+      the signed copy. The server records when each link was opened and
+      signed and from which address. Folio collects the signed copies on
+      start and from Signature requests (Check for updates), merges and checks
+      them as above, and after finalizing, "Send to signers" has the server
+      email everyone the finished document.
+    - Documenso (documenso.com or self-hosted, with an API token): the
+      document and the signers' fields go to Documenso's v2 API, which emails
+      the signers, collects the signatures and seals the document. Folio shows
+      its progress, reminds through it, and keeps the signed document it
+      returns. The browser may block calls to it; the desktop app makes them
+      through Tauri's HTTP plugin.
 - Compare (Tools > Compare with…): pick another version of the document to
   see the two side by side (scrolling together) or overlaid (what only the old
   version has in red, what only the new one has in blue). Pages are paired by
@@ -140,6 +186,56 @@ Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
   offers to restore them. Saving, closing a document or closing the window
   removes its copy. Nothing is sent anywhere.
 
+## Folio Sign (signing server)
+
+`server/` is a small self-hosted signing service for Folio: Node 22.18 or
+newer, no database (requests are JSON files and PDFs in a data folder), and
+SMTP for mail. It serves Folio's built web app as the signing page.
+
+```bash
+npm run build
+```
+
+```bash
+cd server
+```
+
+```bash
+npm install
+```
+
+```bash
+npm run new-key
+```
+
+Put the settings in `server/.env` (or the environment):
+
+```
+FOLIO_SIGN_KEYS=alice=<the key from new-key>,bob=<another key>
+FOLIO_SIGN_PUBLIC_URL=https://sign.example.com
+SMTP_URL=smtps://user:password@smtp.example.com:465
+MAIL_FROM="Folio Sign <sign@example.com>"
+```
+
+```bash
+npm start
+```
+
+Each sender enters the server address and their key in File > Signing
+services. Without `SMTP_URL`, mail is written to `server/data/outbox` as .eml
+files, which is how to try it locally: in development, run the server, set
+`FOLIO_SIGN_PUBLIC_URL=http://localhost:5180` so links open the Vite dev server
+(which forwards `/api` to the server on port 8787), and use
+`http://127.0.0.1:8787` as the address in Folio. Other settings
+(`FOLIO_SIGN_PORT`, `FOLIO_SIGN_HOST`, `FOLIO_SIGN_DATA`, `FOLIO_SIGN_WEB`,
+`FOLIO_SIGN_MAX_MB`) are described in `server/src/config.ts`.
+
+For real use, run it behind HTTPS (a reverse proxy such as Caddy or nginx in
+front of port 8787, which also sets `X-Forwarded-For` so the audit trail gets
+signers' addresses) and back up the data folder. Signing links are long random
+tokens; anyone with a link can sign as that signer, which is the same trust a
+signing email gives.
+
 ## OCR languages
 
 Folio ships with English. Each language is a `@tesseract.js-data/<code>`
@@ -190,6 +286,17 @@ them together (here `eng+deu`). Language codes are listed in
 - `src/lib/certsign.ts`: incremental signing and signature checks;
   `src/lib/certs.ts` digital IDs and CMS (node-forge opens the .pfx/.p12,
   Web Crypto signs and verifies), `src/lib/der.ts` the DER they need
+- `src/lib/envelope.ts`: the signature request carried in the PDF;
+  `src/lib/prepare.ts` signers and their fields, `src/lib/signing.ts` guided
+  signing, `src/lib/requests.ts` the sender's copies, merging and finalizing,
+  `src/lib/mail.ts` handing messages to the mail program (Simple MAPI in
+  `src-tauri/src/lib.rs`)
+- `src/lib/services.ts`: the signing services and their settings;
+  `src/lib/foliosign.ts` the Folio Sign API, `src/lib/linksign.ts` and
+  `src/components/LinkSigning.tsx` signing from a link, `src/lib/documenso.ts`
+  the Documenso API
+- `server/`: Folio Sign (`src/main.ts` routes, `src/store.ts` requests on disk,
+  `src/mail.ts` SMTP or the outbox folder)
 - `src/lib/formfields.ts`: writes designed form fields as AcroForm fields;
   `src/lib/forms.ts` names them and makes them fillable in place
 - `src/components/Overlay.tsx`: all on-page interaction (tools, Edit mode, selection)
