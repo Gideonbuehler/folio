@@ -43,6 +43,81 @@ browser, and the window reopens at the size and place you left it.
 
 Building needs Rust (stable, MSVC) and the Visual Studio C++ build tools.
 
+## Releases
+
+Pushing a version tag builds the installer on GitHub Actions
+(`.github/workflows/release.yml`, windows-latest, tauri-action) and publishes a
+GitHub Release with the installer, its update signature and `latest.json`.
+Installed copies check that file: quietly a few seconds after starting (a found
+update only shows as an **Update** button in the header), and from
+File > Check for updates. The prompt never closes unsaved work: it saves every
+document first (Save and install) or waits (Install on next start). Installing
+restarts Folio and reopens the documents that were open. File > About Folio
+shows the version.
+
+Make a release:
+
+```bash
+npm run bump -- 0.2.0
+```
+
+That sets the version in package.json, package-lock.json,
+src-tauri/tauri.conf.json, Cargo.toml and Cargo.lock (`patch`, `minor` and
+`major` work too) and prints the commit, tag and push commands. Write the
+release notes in the tag message (`git tag -a v0.2.0 -m "..."`): they become
+the release body and the text in Folio's update prompt. The workflow refuses a
+tag that doesn't match the version. Actions > Release > Run workflow only builds
+the installer and keeps it as a workflow artifact.
+
+### One-time setup (yours to do)
+
+1. **Updater key.** The key pair was generated with `tauri signer generate`.
+   Only the public key is in the repo (`plugins.updater.pubkey`). The private
+   key is `%USERPROFILE%\.tauri\folio-updater.key`, its password in
+   `folio-updater.key.password` next to it. Add both as repository secrets:
+   `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Back them up (a password manager) and
+   then delete the password file. If the key is lost, installed copies can't
+   update any more and need a manual reinstall.
+2. **Where updates are downloaded from.** This repository is private, and
+   GitHub doesn't serve a private repository's release files to the app. Folio
+   checks two places in order (`plugins.updater.endpoints`), so pick one:
+   - Make `Gideonbuehler/folio` public. Nothing else to do.
+   - Or keep the source private and publish releases to a public
+     `Gideonbuehler/folio-releases` repository: create it with a README (it
+     needs a `main` branch), set the repository variable `RELEASES_REPO` to
+     `Gideonbuehler/folio-releases`, and add a fine-grained token with
+     Contents: read and write on that repository as the secret
+     `RELEASES_TOKEN`.
+3. **Code signing (optional).** Unsigned installers make SmartScreen warn
+   ("Windows protected your PC"). Updates are verified by the updater key either
+   way. Release builds call `scripts/sign-windows.mjs` for every binary
+   (`src-tauri/tauri.release.conf.json`); it signs with whatever these secrets
+   provide and leaves files unsigned when there are none:
+   - **Azure Artifact Signing** (formerly Trusted Signing), about $9.99 a
+     month, the cheapest option; individuals in the US and Canada only
+     (organizations also in the EU and UK), identity check takes a few days.
+     Create an Artifact Signing account and a Public Trust certificate
+     profile, an app registration with the signer role on it, then add
+     `AZURE_TRUSTED_SIGNING_ENDPOINT` (for example
+     `https://eus.codesigning.azure.net`), `AZURE_TRUSTED_SIGNING_ACCOUNT`,
+     `AZURE_TRUSTED_SIGNING_PROFILE`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
+     `AZURE_CLIENT_SECRET`.
+   - **OV certificate** from a CA (DigiCert, Sectigo, SSL.com, Certum), about
+     $150–300 a year, worldwide. Since 2023 new keys must live on a hardware
+     token or cloud HSM, so a plain .pfx usually means a CA's cloud signing
+     export or an older certificate: add it base64-encoded as
+     `WINDOWS_CERTIFICATE` with `WINDOWS_CERTIFICATE_PASSWORD`. For a USB
+     token, sign on your own machine: `WINDOWS_CERTIFICATE_THUMBPRINT`, then
+     `npm run app:release`.
+   - EV certificates ($400+ a year) no longer skip SmartScreen (since 2024),
+     so they aren't worth it here. With any of these, warnings fade as signed
+     releases build reputation.
+
+A signed release build locally: set `TAURI_SIGNING_PRIVATE_KEY` (the key file's
+path or contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, then
+`npm run app:release`. `npm run app:build` stays unsigned and needs no key.
+
 ## What it does
 
 - **Edit** (E): click any paragraph or list item to rewrite it in place. It

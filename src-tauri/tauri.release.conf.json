@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "signCommand": {
+        "cmd": "node",
+        "args": ["../scripts/sign-windows.mjs", "%1"]
+      }
+    }
+  }
+}

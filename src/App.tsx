@@ -26,6 +26,7 @@ import { closeDoc, openFiles, openPaths, openPdf, pickAndInsertImage, printDocum
 import { guardClose, isDesktop, onOpenFiles, setWindowTitle, startupFiles } from './lib/native';
 import { endSession, startRecovery } from './lib/recovery';
 import { startRecent } from './lib/recent';
+import { startUpdates } from './lib/updates';
 import type { Picked } from './lib/files';
 import { insertImageFile } from './lib/images';
 import { uid } from './lib/util';
@@ -169,7 +170,7 @@ function unsavedQuestion() {
   return n === 1 ? 'You have unsaved changes. Discard them?' : `${n} documents have unsaved changes. Discard them?`;
 }
 
-/** Desktop app: files from Explorer, the close prompt and the window title. */
+/** Desktop app: files from Explorer, the close prompt, updates and the window title. */
 function useDesktop() {
   const fileName = useStore((s) => s.fileName);
   const dirty = useStore((s) => s.dirty);
@@ -183,6 +184,7 @@ function useDesktop() {
     onOpenFiles((paths) => void openPaths(paths)).then((u) => (stopFiles = u));
     // A clean close clears the autosaves, so the next launch doesn't offer to restore them.
     guardClose(unsavedQuestion, endSession).then((u) => (stopClose = u));
+    void startUpdates();
     return () => {
       stopFiles?.();
       stopClose?.();

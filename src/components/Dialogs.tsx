@@ -16,6 +16,7 @@ import { UnsavedDialog } from './SessionDialogs';
 import { RequestsDialog, SendRequestDialog } from './RequestPanel';
 import { DeclineDialog } from './SigningBar';
 import { ServicesDialog } from './ServicesDialog';
+import { AboutDialog, UpdateDialog } from './UpdateDialogs';
 
 const close = () => actions.set({ dialog: null });
 
@@ -58,6 +59,10 @@ export function DialogHost() {
       return <DeclineDialog />;
     case 'services':
       return <ServicesDialog back={dialog.back} />;
+    case 'update':
+      return <UpdateDialog />;
+    case 'about':
+      return <AboutDialog />;
   }
 }
 

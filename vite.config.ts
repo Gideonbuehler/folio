@@ -1,7 +1,10 @@
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+
+/** Kept in step with src-tauri by `npm run bump`. */
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 /** Test PDFs are served in development only; they don't ship with the app. */
 function dropDevSamples(): Plugin {
@@ -20,6 +23,7 @@ function dropDevSamples(): Plugin {
 
 export default defineConfig({
   plugins: [react(), dropDevSamples()],
+  define: { __APP_VERSION__: JSON.stringify(version) },
   // The desktop shell (src-tauri) loads the dev server from this exact port.
   server: {
     port: 5180,

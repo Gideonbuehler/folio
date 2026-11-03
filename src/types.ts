@@ -266,7 +266,9 @@ export type Dialog =
   | { kind: 'sendRequest' }
   | { kind: 'requests' }
   | { kind: 'decline' }
-  | { kind: 'services'; back?: boolean };
+  | { kind: 'services'; back?: boolean }
+  | { kind: 'update' }
+  | { kind: 'about' };
 
 /** A signature request field being signed: where the signature or initials go. */
 export interface StampTarget {

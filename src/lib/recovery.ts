@@ -242,6 +242,13 @@ async function autosave() {
   }
 }
 
+/** Brings the autosaves up to date now, e.g. before an update closes the app from outside. */
+export function flushAutosave() {
+  clearTimeout(timer);
+  timer = 0;
+  return serial(autosave);
+}
+
 /** Clean exit: the user saved or chose to discard, so nothing needs recovering. */
 export async function endSession() {
   closing = true;
