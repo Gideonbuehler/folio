@@ -1,32 +1,18 @@
 import { useEffect } from 'react';
-import { EyeOff, FilePlus2, Files, FileText, FolderOpen, Highlighter, LayoutGrid, Lock, PenLine, Send, Signature, TextCursorInput, ShieldCheck, X } from 'lucide-react';
+import { FilePlus2, Files, FileText, FolderOpen, ShieldCheck, X } from 'lucide-react';
 import { combinePdfs, newBlankDocument, openPdf, openRecent } from '../lib/commands';
 import { clearRecent, loadRecent, removeRecent, useRecent, visibleRecent } from '../lib/recent';
 import { MOD } from '../lib/util';
 import { IconButton } from './ui';
 import { OutForSignature } from './RequestPanel';
-
-const FEATURES = [
-  { icon: <TextCursorInput size={18} />, title: 'Edit text', text: 'Click any line to rewrite it in place.' },
-  { icon: <Highlighter size={18} />, title: 'Annotate', text: 'Highlight, underline, notes and comments.' },
-  { icon: <PenLine size={18} />, title: 'Draw & shapes', text: 'Pen, arrows, boxes, text boxes and images.' },
-  { icon: <Signature size={18} />, title: 'Fill & sign', text: 'Fill forms, then sign by drawing or typing.' },
-  { icon: <Send size={18} />, title: 'Request signatures', text: 'Send a document out for signature by email.' },
-  { icon: <LayoutGrid size={18} />, title: 'Organize', text: 'Reorder, rotate, insert, extract and merge pages.' },
-  { icon: <EyeOff size={18} />, title: 'Redact', text: 'Permanently remove sensitive content.' },
-  { icon: <Lock size={18} />, title: 'Protect', text: 'Encrypt with a password (AES-256).' },
-  { icon: <Files size={18} />, title: 'Combine', text: 'Merge several PDFs into one document.' },
-];
+import { BrandMark } from './BrandMark';
 
 export function Welcome() {
   return (
     <div className="welcome">
       <div className="welcome-card">
         <div className="welcome-mark" aria-hidden>
-          <svg viewBox="0 0 32 32" width="44" height="44">
-            <rect x="5" y="2" width="22" height="28" rx="5" fill="var(--accent)" />
-            <path d="M11 10h10M11 15.5h10M11 21h6" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
-          </svg>
+          <BrandMark size={72} />
         </div>
         <h1>Edit PDFs without the clutter</h1>
         <p className="lede">Open a document to annotate, edit, sign, organize and protect it. Everything runs on your device; your files are never uploaded.</p>
@@ -46,17 +32,6 @@ export function Welcome() {
         </p>
         <OutForSignature />
         <RecentFiles />
-      </div>
-      <div className="features">
-        {FEATURES.map((f) => (
-          <div key={f.title} className="feature">
-            <span className="feature-icon">{f.icon}</span>
-            <div>
-              <strong>{f.title}</strong>
-              <p>{f.text}</p>
-            </div>
-          </div>
-        ))}
       </div>
       <p className="privacy">
         <ShieldCheck size={14} /> Private by design: no accounts, no uploads.

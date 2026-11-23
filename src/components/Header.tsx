@@ -48,6 +48,7 @@ import { recognizeText, useOcr } from '../lib/ocr';
 import { canSaveInPlace } from '../lib/files';
 import { IconButton, MenuButton, Popover, usePopover, type MenuItem } from './ui';
 import { setZoomAnchor } from './Viewer';
+import { BrandMark } from './BrandMark';
 
 const I = 16;
 
@@ -116,10 +117,7 @@ export function Header() {
     <header className="header">
       <div className="header-left">
         <div className="brand" aria-label="Folio">
-          <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden>
-            <rect x="5" y="2" width="22" height="28" rx="5" fill="var(--accent)" />
-            <path d="M11 10h10M11 15.5h10M11 21h6" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
-          </svg>
+          <BrandMark size={22} />
           <span>Folio</span>
         </div>
         <MenuButton label="File" items={fileItems} className="ghost" />

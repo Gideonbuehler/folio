@@ -1,16 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#6375ea"/>
-      <stop offset="1" stop-color="#3d4fc4"/>
+    <linearGradient id="bg" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#8b6ff9"/>
+      <stop offset="0.55" stop-color="#5a5ae8"/>
+      <stop offset="1" stop-color="#3341c0"/>
     </linearGradient>
-    <linearGradient id="fold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#dfe4ff"/>
-      <stop offset="1" stop-color="#b9c2f5"/>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
+    <linearGradient id="flap" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#e6e4ff"/>
+      <stop offset="1" stop-color="#aeb2f7"/>
+    </linearGradient>
+    <filter id="fold" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="-10" dy="14" stdDeviation="16" flood-color="#141850" flood-opacity="0.4"/>
+    </filter>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#141850" flood-opacity="0.28"/>
+    </filter>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
-  <path d="M332 232h268l156 156v376a44 44 0 0 1-44 44H332a44 44 0 0 1-44-44V276a44 44 0 0 1 44-44z" fill="#fff"/>
-  <path d="M600 232v112a44 44 0 0 0 44 44h112z" fill="url(#fold)"/>
-  <path d="M376 478h272M376 566h272M376 654h168" stroke="#4c5fd5" stroke-width="40" stroke-linecap="round"/>
+  <path d="M160 48H704L976 320V864a112 112 0 0 1-112 112H160A112 112 0 0 1 48 864V160A112 112 0 0 1 160 48z" fill="url(#bg)"/>
+  <path d="M160 48H704L880 224C700 300 420 330 48 300V160A112 112 0 0 1 160 48z" fill="url(#gloss)"/>
+  <path filter="url(#fold)" d="M704 48V256a64 64 0 0 0 64 64H976z" fill="url(#flap)"/>
+  <path filter="url(#lift)" d="M392 768V324H624M392 548H612" fill="none" stroke="#fff" stroke-width="116" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

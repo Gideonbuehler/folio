@@ -10,16 +10,14 @@ import type { LinkInfo } from '../lib/foliosign';
 import { Viewer } from './Viewer';
 import { SigningBar } from './SigningBar';
 import { Button } from './ui';
+import { BrandMark } from './BrandMark';
 
 function Brand({ title }: { title?: string }) {
   return (
     <header className="header link-header">
       <div className="header-left">
         <div className="brand" aria-label="Folio">
-          <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden>
-            <rect x="5" y="2" width="22" height="28" rx="5" fill="var(--accent)" />
-            <path d="M11 10h10M11 15.5h10M11 21h6" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
-          </svg>
+          <BrandMark size={22} />
           <span>Folio</span>
         </div>
       </div>
