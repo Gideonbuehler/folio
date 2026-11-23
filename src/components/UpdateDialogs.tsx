@@ -3,6 +3,7 @@ import { actions, useStore } from '../store';
 import { isDesktop } from '../lib/native';
 import { APP_VERSION, checkForUpdates, installOnNextStart, saveAndInstall, useUpdates } from '../lib/updates';
 import { Button, Modal } from './ui';
+import { BrandMark } from './BrandMark';
 import '../updates.css';
 
 const close = () => actions.set({ dialog: null });
@@ -82,10 +83,7 @@ export function AboutDialog() {
       }
     >
       <div className="about">
-        <svg viewBox="0 0 32 32" width="48" height="48" aria-hidden>
-          <rect x="5" y="2" width="22" height="28" rx="5" fill="var(--accent)" />
-          <path d="M11 10h10M11 15.5h10M11 21h6" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
-        </svg>
+        <BrandMark size={52} />
         <div>
           <div className="about-name">Folio</div>
           <div>Version {APP_VERSION}</div>
