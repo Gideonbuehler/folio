@@ -70,9 +70,11 @@ That sets the version in package.json, package-lock.json,
 src-tauri/tauri.conf.json, Cargo.toml and Cargo.lock (`patch`, `minor` and
 `major` work too) and prints the commit, tag and push commands. Write the
 release notes in the tag message (`git tag -a v0.2.0 -m "..."`): they become
-the release body and the text in Folio's update prompt. The workflow refuses a
-tag that doesn't match the version. Actions > Release > Run workflow only builds
-the installer and keeps it as a workflow artifact.
+the release body and the text in Folio's update prompt. Push the tag on its own
+(`git push origin v0.2.0`), after the branch: for v0.2.0, pushing both in one
+command didn't start the workflow. The workflow refuses a tag that doesn't match
+the version. Actions > Release > Run workflow only builds the installer and
+keeps it as a workflow artifact.
 
 ### Setup
 

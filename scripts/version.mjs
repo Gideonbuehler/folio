@@ -70,11 +70,13 @@ function bump(how) {
   check();
   console.log(`
 ${current} -> ${version}. Next, write what changed in the tag message (the update
-prompt shows it), then push the tag to build and publish the release:
+prompt shows it), then push the tag on its own to build and publish the release
+(a tag pushed together with the branch may not start the workflow):
 
   git commit -am "Folio ${version}"
   git tag -a v${version} -m "What's new in ${version}"
-  git push origin main v${version}`);
+  git push origin main
+  git push origin v${version}`);
 }
 
 const [arg, tag] = process.argv.slice(2);
