@@ -36,6 +36,8 @@ import {
   Send,
   ListChecks,
   Cloud,
+  RefreshCw,
+  BadgeInfo,
 } from 'lucide-react';
 import { actions, insertBlankPage, redo, setTheme, setZoom, undo, useStore, zoomStep, ZOOM_STEPS } from '../store';
 import { closeDoc, combinePdfs, extractPages, insertPdfPages, newBlankDocument, openPdf, openRecent, printDocument, saveDocument } from '../lib/commands';
@@ -46,7 +48,10 @@ import { clearRecent, useRecent, visibleRecent } from '../lib/recent';
 import { MOD } from '../lib/util';
 import { recognizeText, useOcr } from '../lib/ocr';
 import { canSaveInPlace } from '../lib/files';
+import { isDesktop } from '../lib/native';
+import { checkForUpdates } from '../lib/updates';
 import { IconButton, MenuButton, Popover, usePopover, type MenuItem } from './ui';
+import { UpdateButton } from './UpdateDialogs';
 import { setZoomAnchor } from './Viewer';
 import { BrandMark } from './BrandMark';
 
@@ -79,6 +84,9 @@ export function Header() {
     { separator: true },
     { label: 'Document properties…', icon: <Info size={I} />, disabled: !hasDoc, onClick: () => set({ dialog: { kind: 'properties' } }) },
     { label: 'Close tab', icon: <X size={I} />, shortcut: `${MOD}+W`, disabled: !hasDoc, onClick: closeDoc },
+    { separator: true },
+    ...(isDesktop ? [{ label: 'Check for updates…', icon: <RefreshCw size={I} />, onClick: () => void checkForUpdates() }] : []),
+    { label: 'About Folio', icon: <BadgeInfo size={I} />, onClick: () => set({ dialog: { kind: 'about' } }) },
   ];
 
   const toolItems = (): MenuItem[] => {
@@ -158,6 +166,7 @@ export function Header() {
             </IconButton>
           </>
         )}
+        <UpdateButton />
         <IconButton tip={`Theme: ${theme}`} onClick={() => setTheme(nextTheme)}>
           {theme === 'dark' ? <Moon size={17} /> : theme === 'light' ? <Sun size={17} /> : <Monitor size={17} />}
         </IconButton>

@@ -81,6 +81,19 @@ export async function closeTabs(ids: string[]) {
   return true;
 }
 
+/** Saves every tab with unsaved changes. Returns false if one wasn't saved (cancelled or failed). */
+export async function saveAllTabs() {
+  const back = get().activeTab;
+  for (const { id } of get().tabs) {
+    if (!tabState(id)?.dirty) continue;
+    switchTab(id);
+    await saveDocument();
+    if (tabState(id)?.dirty) return false;
+  }
+  if (back && tabState(back)) switchTab(back);
+  return true;
+}
+
 export async function closeDoc() {
   const id = get().activeTab;
   if (id) await closeTabs([id]);

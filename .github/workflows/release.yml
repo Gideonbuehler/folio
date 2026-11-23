@@ -1,0 +1,120 @@
+# Pushing a version tag (v0.2.0) builds the Windows installer, signs the
+# update with the updater key and publishes a GitHub Release with the
+# installer and latest.json, which installed copies of Folio check.
+# "Run workflow" (Actions > Release) only builds the installer and keeps it
+# as a workflow artifact. Setup: "Releases" in docs/development.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the version
+        if: env.IS_TAG == 'true'
+        run: node scripts/version.mjs --check "${{ github.ref_name }}"
+
+      - name: Check the updater key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is missing, so updates can't be signed. See Releases in docs/development.md."
+            exit 1
+          fi
+
+      - name: Release notes
+        id: release
+        if: env.IS_TAG == 'true'
+        shell: bash
+        run: |
+          # The notes are the annotated tag's message; the update prompt in Folio shows them.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          notes=""
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]; then
+            notes=$(git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$GITHUB_REF_NAME")
+          fi
+          {
+            echo 'notes<<FOLIO_NOTES_END'
+            echo "${notes:-Fixes and improvements.}"
+            echo 'FOLIO_NOTES_END'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      # Code signing is optional: add the secrets for one of these and the
+      # next release is signed (scripts/sign-windows.mjs does the signing).
+      - name: Set up code signing
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+        run: |
+          if ($env:AZURE_TRUSTED_SIGNING_ENDPOINT) {
+            Write-Host 'Code signing with Azure Trusted Signing'
+            cargo install trusted-signing-cli --locked
+          } elseif ($env:WINDOWS_CERTIFICATE) {
+            Write-Host 'Code signing with the .pfx certificate'
+            $pfx = Join-Path $env:RUNNER_TEMP 'folio-signing.pfx'
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            "WINDOWS_CERTIFICATE_FILE=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            Write-Host '::notice::No code signing certificate is set up, so Windows will warn about the installer. See Releases in docs/development.md.'
+          }
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        with:
+          args: --config src-tauri/tauri.release.conf.json
+          # Without a tag (Run workflow) it only builds.
+          tagName: ${{ env.IS_TAG == 'true' && github.ref_name || '' }}
+          releaseName: Folio ${{ github.ref_name }}
+          releaseBody: ${{ steps.release.outputs.notes }}
+          releaseDraft: false
+          # v1.2.0-beta.1 is a prerelease: installed copies only update to full releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Keep the installer
+        if: env.IS_TAG != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: folio-installer
+          path: src-tauri/target/release/bundle/nsis/*
+          if-no-files-found: error
