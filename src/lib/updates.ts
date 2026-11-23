@@ -1,8 +1,8 @@
 /**
  * Updates for the desktop app (tauri-plugin-updater). Each release on GitHub
  * carries a signed installer and a latest.json that the app checks; see
- * "Releases" in the README. Folio never installs over unsaved work: it asks to
- * save first, or waits for the next start.
+ * "Releases" in docs/development.md. Folio never installs over unsaved work:
+ * it asks to save first, or waits for the next start.
  */
 import { create } from 'zustand';
 import type { Update } from '@tauri-apps/plugin-updater';

@@ -2,7 +2,7 @@
 # update with the updater key and publishes a GitHub Release with the
 # installer and latest.json, which installed copies of Folio check.
 # "Run workflow" (Actions > Release) only builds the installer and keeps it
-# as a workflow artifact. Setup: "Releases" in the README.
+# as a workflow artifact. Setup: "Releases" in docs/development.md.
 name: Release
 
 on:
@@ -21,9 +21,6 @@ jobs:
     runs-on: windows-latest
     env:
       IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
-      # The repository releases are published to: this one, or a public one
-      # for downloads (repository variable RELEASES_REPO, owner/name).
-      RELEASES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
     steps:
       - uses: actions/checkout@v5
 
@@ -37,20 +34,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is missing, so updates can't be signed. See Releases in the README."
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is missing, so updates can't be signed. See Releases in docs/development.md."
             exit 1
           fi
 
-      - name: Release target and notes
+      - name: Release notes
         id: release
         if: env.IS_TAG == 'true'
         shell: bash
         run: |
-          echo "owner=${RELEASES_REPO%%/*}" >> "$GITHUB_OUTPUT"
-          echo "repo=${RELEASES_REPO#*/}" >> "$GITHUB_OUTPUT"
-          # A separate releases repository doesn't have this commit; tag its main branch there.
-          if [ "$RELEASES_REPO" = "$GITHUB_REPOSITORY" ]; then commitish="$GITHUB_SHA"; else commitish=main; fi
-          echo "commitish=$commitish" >> "$GITHUB_OUTPUT"
           # The notes are the annotated tag's message; the update prompt in Folio shows them.
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           notes=""
@@ -93,13 +85,13 @@ jobs:
             [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
             "WINDOWS_CERTIFICATE_FILE=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           } else {
-            Write-Host '::notice::No code signing certificate is set up, so Windows will warn about the installer. See Releases in the README.'
+            Write-Host '::notice::No code signing certificate is set up, so Windows will warn about the installer. See Releases in docs/development.md.'
           }
 
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -118,9 +110,6 @@ jobs:
           releaseDraft: false
           # v1.2.0-beta.1 is a prerelease: installed copies only update to full releases.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          owner: ${{ steps.release.outputs.owner }}
-          repo: ${{ steps.release.outputs.repo }}
-          releaseCommitish: ${{ steps.release.outputs.commitish }}
 
       - name: Keep the installer
         if: env.IS_TAG != 'true'

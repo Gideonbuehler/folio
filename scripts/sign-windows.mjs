@@ -70,5 +70,5 @@ if (env.AZURE_TRUSTED_SIGNING_ENDPOINT) {
   console.log(`Signing ${name} with ${env.WINDOWS_CERTIFICATE_FILE ? 'the .pfx certificate' : 'the certificate in the Windows store'}`);
   run(signtool(), ['sign', ...cert, '/fd', 'sha256', '/tr', timestamp, '/td', 'sha256', '/d', 'Folio', file]);
 } else {
-  console.log(`Not code-signing ${name}: no certificate is set up (see "Releases" in the README).`);
+  console.log(`Not code-signing ${name}: no certificate is set up (see "Releases" in docs/development.md).`);
 }
